@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Net-Proxy-Tool 通用跨平台局域网出海与 Docker 容器隔离控制中心 (v1.3.0)</title>
+  <link rel="stylesheet" href="style.css?v=1.3.0">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- 顶部全局导航栏 -->
+    <header class="navbar">
+      <div class="navbar-brand">
+        <span class="brand-icon">🚀</span>
+        <div class="brand-info">
+          <h1>Net-Proxy-Tool <span class="tag-version">v1.3.0</span></h1>
+          <p class="brand-sub">纯净零依赖 · 进程级沙箱 · x86/ARM/Win/Mac/Linux 全架构通用 · 多网关/多节点拓扑</p>
+        </div>
+      </div>
+
+      <div class="navbar-right">
+        <div class="global-status-pill" id="global-status-pill">
+          <span class="status-indicator-dot online"></span>
+          <span id="global-gw-status-text">网关: 192.168.1.100:7890</span>
+        </div>
+        <!-- 导航 Tabs -->
+        <nav class="nav-tab-group">
+          <button class="nav-btn active" data-tab="tab-wizard">
+            <span class="nav-icon">🎯</span> 接入向导
+          </button>
+          <button class="nav-btn" data-tab="tab-sandbox">
+            <span class="nav-icon">⚡</span> 沙箱控制台
+          </button>
+          <button class="nav-btn" data-tab="tab-topology">
+            <span class="nav-icon">🌐</span> 拓扑与节点管理
+          </button>
+          <button class="nav-btn" data-tab="tab-handbook">
+            <span class="nav-icon">📖</span> 开发者手册
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <!-- 主体内容区域 -->
+    <main class="content-body">
+      
+      <!-- ============================================================== -->
+      <!-- TAB 1: 🎯 接入向导 (Setup Wizard, 4 步渐进流水线) -->
+      <!-- ============================================================== -->
+      <div class="tab-pane active" id="tab-wizard">
+        <div class="wizard-header-banner">
+          <div class="banner-title">
+            <h2>🎯 业务节点网络穿透与代理接入向导</h2>
+            <p>为当前或任意新接入的业务节点提供清晰的 4 步渐进式开通流程。按序完成每一步骤，前置步骤通过后自动解锁后续步骤。</p>
+          </div>
+          <div class="stepper-pipeline">
+            <div class="pipeline-step active" id="pipe-step-1">
+              <span class="pipe-num">1</span>
+              <span class="pipe-name">校验代理网关</span>
+            </div>
+            <div class="pipe-divider">➔</div>
+            <div class="pipe-step locked" id="pipe-step-2">
+              <span class="pipe-num">2</span>
+              <span class="pipe-name">绑定业务节点</span>
+            </div>
+            <div class="pipe-divider">➔</div>
+            <div class="pipe-step locked" id="pipe-step-3">
+              <span class="pipe-num">3</span>
+              <span class="pipe-name">全链路穿透诊断</span>
+            </div>
+            <div class="pipe-divider">➔</div>
+            <div class="pipe-step locked" id="pipe-step-4">
+              <span class="pipe-num">4</span>
+              <span class="pipe-name">开箱即用交付</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="wizard-container">
+          <!-- 步骤 1: 校验代理网关 -->
+          <section class="card step-card active-card" id="card-step-1">
+            <div class="card-header">
+              <div class="step-badge-title">
+                <span class="step-badge">步骤 1</span>
+                <h3>确认并验证代理网关节点 (Gateway)</h3>
+              </div>
+              <span class="step-status-tag" id="status-tag-step-1">● 等待探测</span>
+            </div>
+            <p class="step-explain">
+              网关节点是具有科学出网权限的跳板机器（例如配置有 Clash Verge 的 183 工作站）。请选择网关并验证端口是否畅通：
+            </p>
+            <div class="step-body-row">
+              <div class="input-inline-group">
+                <label for="wizard-gw-select">选择出网代理网关:</label>
+                <select id="wizard-gw-select" class="form-select"></select>
+              </div>
+              <button class="btn btn-primary" id="wizard-test-gw-btn">
+                <span class="btn-icon">⚡</span> 探测该网关连通性
+              </button>
+              <button class="btn btn-secondary" id="wizard-set-default-gw-btn">
+                设为全局默认网关
+              </button>
+            </div>
+            <div class="step-result-banner" id="step-1-result">
+              <span class="res-msg">点击【探测连通性】以验证网关端口与服务是否可用。验证成功后将自动解锁步骤 2。</span>
+            </div>
+          </section>
+
+          <!-- 步骤 2: 绑定目标业务节点 -->
+          <section class="card step-card locked-card" id="card-step-2">
+            <div class="card-header">
+              <div class="step-badge-title">
+                <span class="step-badge">步骤 2</span>
+                <h3>指定/登记目标业务节点 (Worker Node)</h3>
+              </div>
+              <span class="step-status-tag" id="status-tag-step-2">🔒 待解锁</span>
+            </div>
+            <p class="step-explain">
+              选择需要出海访问的业务节点（例如 186 边缘 AI 计算节点、开发工作站或任意新接入的机器）。支持在下方直接登记新机器：
+            </p>
+            <div class="step-body-row">
+              <div class="input-inline-group">
+                <label for="wizard-client-select">选择目标业务节点:</label>
+                <select id="wizard-client-select" class="form-select"></select>
+              </div>
+              <button class="btn btn-secondary" id="wizard-open-add-client-btn">
+                <span class="btn-icon">➕</span> 登记新业务节点
+              </button>
+              <button class="btn btn-primary" id="wizard-confirm-client-btn">
+                <span class="btn-icon">✅</span> 确认选定并进入穿透体检
+              </button>
+            </div>
+            <!-- 节点属性卡片 -->
+            <div class="client-meta-card" id="wizard-client-meta">
+              <div class="meta-item">
+                <span class="meta-label">节点 IP:</span>
+                <strong id="w-meta-host">--</strong>
+              </div>
+              <div class="meta-item">
+                <span class="meta-label">系统架构:</span>
+                <span class="badge-os" id="w-meta-os">--</span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-label">绑定路由:</span>
+                <strong id="w-meta-gw">--</strong>
+              </div>
+              <div class="meta-item">
+                <span class="meta-label">业务标签:</span>
+                <span id="w-meta-tags">--</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- 步骤 3: 全链路穿透诊断 -->
+          <section class="card step-card locked-card" id="card-step-3">
+            <div class="card-header">
+              <div class="step-badge-title">
+                <span class="step-badge">步骤 3</span>
+                <h3>全链路穿透体检 (End-to-End Diagnostic)</h3>
+              </div>
+              <span class="step-status-tag" id="status-tag-step-3">🔒 待解锁</span>
+            </div>
+            <p class="step-explain">
+              通过选定网关，对研发核心服务（代码托管、预训练大模型、官方依赖仓库等 7 大目标）发起真实沙箱嗅探，验证实际出海能力：
+            </p>
+            <div class="diag-action-bar">
+              <button class="btn btn-primary" id="wizard-start-diag-btn">
+                <span class="btn-icon">🚀</span> 开始全链路穿透体检
+              </button>
+              <span class="diag-timestamp" id="wizard-diag-time">未诊断</span>
+            </div>
+            <div class="target-grid-v3" id="wizard-target-grid">
+              <!-- 动态填充 7 大目标 -->
+            </div>
+          </section>
+
+          <!-- 步骤 4: Web 自动化开通与免命令出海交付 -->
+          <section class="card step-card locked-card" id="card-step-4">
+            <div class="card-header">
+              <div class="step-badge-title">
+                <span class="step-badge">步骤 4</span>
+                <h3>Web 自动化开通与免命令出海交付 (Zero-Command Automation Handover)</h3>
+              </div>
+              <span class="step-status-tag success" id="status-tag-step-4">🎯 待交付</span>
+            </div>
+            
+            <div class="handover-banner">
+              <span class="handover-icon">🎉</span>
+              <div class="handover-text">
+                <h4>全链路穿透验证通过，节点已接入自动化下发通道！</h4>
+                <p>当前目标节点: <strong id="handover-target-name">Docker 独立开发容器</strong> | 默认网关: <strong id="handover-gw-name">192.168.1.100:7890</strong></p>
+              </div>
+            </div>
+
+            <!-- Web 自动化一键开通控制中心 -->
+            <div class="auto-provision-card">
+              <div class="auto-provision-header">
+                <div class="auto-node-identity">
+                  <span class="auto-node-icon">🚀</span>
+                  <div class="auto-node-text">
+                    <div class="auto-node-title-row">
+                      <h4 id="wizard-target-disp-name">Docker 独立开发容器</h4>
+                      <span class="switch-badge off" id="wizard-switch-badge">⚪ 当前处于原生直连状态 (未开启出海)</span>
+                    </div>
+                    <p class="auto-node-sub" id="wizard-target-disp-sub">目标 IP: 192.168.1.102 | 出海出口: 192.168.1.100:7890 | 隔离性: 宿主机与其他容器 100% 保持直连</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 核心一键操作按钮组 -->
+              <div class="auto-action-buttons">
+                <button class="btn btn-primary btn-lg" id="wizard-btn-proxy-on">
+                  <span class="btn-icon">⚡</span> Web 一键开通出海通道 (免命令直接出海)
+                </button>
+                <button class="btn btn-secondary btn-lg" id="wizard-btn-proxy-off">
+                  <span class="btn-icon">🛑</span> 一键关闭出海通道 (恢复直连)
+                </button>
+                <button class="btn btn-outline btn-lg" id="wizard-btn-node-test">
+                  <span class="btn-icon">🔍</span> 实时复测目标连通性
+                </button>
+              </div>
+
+              <!-- 实时执行状态与测试反馈框 -->
+              <div class="live-feedback-box" id="wizard-live-feedback" style="display:none;">
+                <div class="feedback-header">
+                  <span class="feedback-badge" id="wizard-feedback-badge">检测中...</span>
+                  <span class="feedback-time" id="wizard-feedback-time">--</span>
+                </div>
+                <div class="feedback-content" id="wizard-feedback-content"></div>
+              </div>
+
+              <!-- 免命令与零污染技术说明 -->
+              <div class="clean-guarantee-box highlight-guarantee">
+                <span class="shield-icon">🛡️</span>
+                <div class="guarantee-text">
+                  <strong>核心优势保障：</strong>
+                  <ul class="guarantee-list">
+                    <li><strong>免终端敲命令：</strong>在上方点击【Web 一键开通出海通道】后，系统自动通过自动化运维通道下发配置。开通后，直接在目标机器/容器中执行日常命令（如 <code>curl https://www.google.com</code>、<code>git clone</code>、<code>pip install</code>）即可直接出海，无需输入任何 proxy 命令！</li>
+                    <li><strong>绝对环境隔离与零破坏：</strong>对于 Docker 容器，仅在该容器内部挂载出海通道；70 宿主机及其他 10+ 个生产容器 100% 保持直连，全局 <code>/etc/environment</code>、系统注册表绝无任何残留修改。</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <!-- 可选查阅：高级研发命令与参考代码 (折叠式) -->
+            <details class="handover-reference-details">
+              <summary class="reference-summary">🛠️ 高级研发命令与代码参考 (仅供高级开发者查阅，日常使用无需手动执行)</summary>
+              <div class="handover-blocks" id="handover-blocks-container">
+                <!-- 动态注入当前操作系统的命令 -->
+              </div>
+            </details>
+          </section>
+        </div>
+      </div>
+
+
+      <!-- ============================================================== -->
+      <!-- TAB 2: ⚡ 沙箱控制台 (Sandbox Console, 日常高频调用) -->
+      <!-- ============================================================== -->
+      <div class="tab-pane" id="tab-sandbox">
+        <!-- 概览指标行 -->
+        <div class="metrics-row">
+          <div class="metric-card">
+            <span class="m-label">当前活跃代理网关</span>
+            <div class="m-val" id="sb-active-gw-val">192.168.1.100:7890</div>
+            <span class="m-sub" id="sb-active-gw-sub">局域网代理工作站 (Clash Verge / Mihomo)</span>
+          </div>
+          <div class="metric-card">
+            <span class="m-label">网关 TCP 状态</span>
+            <div class="m-val green" id="sb-gw-status-val">● 连通正常</div>
+            <span class="m-sub" id="sb-gw-rtt-sub">响应耗时: 85 ms</span>
+          </div>
+          <div class="metric-card">
+            <span class="m-label">外网穿透达标率</span>
+            <div class="m-val blue" id="sb-diag-rate-val">7 / 7 服务在线</div>
+            <span class="m-sub" id="sb-diag-summary">Google / GitHub / HF / OpenAI 全部正常</span>
+          </div>
+        </div>
+
+        <!-- 在线任务代理沙箱执行器 -->
+        <section class="card sandbox-exec-card">
+          <div class="card-header">
+            <div class="title-with-desc">
+              <h2>⚡ 任务按需代理沙箱执行器</h2>
+              <span class="tag tag-sandbox">进程级沙箱 · 用完即毁 · 零环境污染</span>
+            </div>
+            <div class="header-actions">
+              <button class="btn btn-secondary btn-sm" id="sb-quick-diag-btn">
+                <span class="btn-icon">🔄</span> 刷新连通性
+              </button>
+            </div>
+          </div>
+
+          <div class="sandbox-controls">
+            <div class="cmd-input-wrapper">
+              <span class="cmd-prompt">with-proxy $</span>
+              <input type="text" id="sb-cmd-input" class="cmd-input" placeholder="输入待执行命令，例如: curl -I https://www.google.com" value="curl -I https://www.google.com">
+            </div>
+
+            <div class="cmd-options-row">
+              <div class="opt-group">
+                <label for="sb-template-select">快捷命令模板:</label>
+                <select id="sb-template-select" class="form-select">
+                  <option value="curl -I https://www.google.com">Google 连通性测试 (curl -I)</option>
+                  <option value="curl -I https://github.com">GitHub 连通性测试 (curl -I)</option>
+                  <option value="curl -s https://api.github.com/zen">GitHub Zen API 测试</option>
+                  <option value="python -c &quot;import urllib.request; print(urllib.request.urlopen('https://www.google.com').getcode())&quot;">Python 内置库请求 Google</option>
+                  <option value="pip --version">查看 Pip 环境版本</option>
+                </select>
+              </div>
+
+              <div class="opt-group">
+                <label for="sb-gw-override-select">指定网关出海:</label>
+                <select id="sb-gw-override-select" class="form-select">
+                  <!-- 动态填充 -->
+                </select>
+              </div>
+
+              <button class="btn btn-primary" id="sb-run-btn">
+                <span class="btn-icon">🚀</span> 在代理沙箱中运行
+              </button>
+            </div>
+          </div>
+
+          <!-- 终端日志框 -->
+          <div class="terminal-shell">
+            <div class="terminal-topbar">
+              <div class="terminal-lights">
+                <span class="t-light red"></span>
+                <span class="t-light yellow"></span>
+                <span class="t-light green"></span>
+              </div>
+              <span class="terminal-title">Sandbox Execution Output (Pure Process Isolation)</span>
+              <div class="terminal-actions">
+                <span id="sb-status-badge" class="badge-status idle">空闲就绪</span>
+                <button id="sb-clear-term-btn" class="btn-mini">清屏</button>
+              </div>
+            </div>
+            <pre id="sb-terminal-output" class="terminal-view"><span class="t-dim"># 控制台已就绪。输入待运行命令后点击【在代理沙箱中运行】...</span></pre>
+          </div>
+        </section>
+      </div>
+
+
+      <!-- ============================================================== -->
+      <!-- TAB 3: 🌐 拓扑与节点管理 (Topology & Node Manager, 完整 CRUD) -->
+      <!-- ============================================================== -->
+      <div class="tab-pane" id="tab-topology">
+        <!-- 业务节点池 CRUD -->
+        <section class="card">
+          <div class="card-header">
+            <div class="title-with-desc">
+              <h2>🤖 目标业务节点池 (Worker Nodes Pool)</h2>
+              <p class="card-subdesc">纳管团队的所有计算设备、工控机与边缘节点，支持动态增加、编辑、删除与连通预检</p>
+            </div>
+            <div class="header-actions">
+              <button class="btn btn-secondary" id="top-enable-all-btn" title="一键将列表中的所有节点切换为出海状态">
+                <span class="btn-icon">⚡</span> 一键全部出海
+              </button>
+              <button class="btn btn-danger-soft" id="top-disable-all-btn" title="一键切断所有节点代理，恢复100%原生直连">
+                <span class="btn-icon">🛑</span> 一键恢复全部直连
+              </button>
+              <button class="btn btn-secondary" id="top-health-check-btn" title="对所有节点并发探测出海状态与延迟">
+                <span class="btn-icon">🔄</span> 全网巡检
+              </button>
+              <button class="btn btn-secondary" id="top-audit-btn" title="查看最近的节点运维与开关审计流水">
+                <span class="btn-icon">📜</span> 审计日志
+              </button>
+              <button class="btn btn-primary" id="top-add-client-btn">
+                <span class="btn-icon">➕</span> 登记新业务节点
+              </button>
+            </div>
+          </div>
+
+          <!-- 工业级搜索与多维过滤工具栏 -->
+          <div class="table-toolbar">
+            <div class="search-box">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="node-search-input" class="search-input" placeholder="实时过滤节点名称、IP、端口、容器名或业务标签...">
+            </div>
+            <div class="filter-box">
+              <select id="node-filter-type" class="filter-select">
+                <option value="all">🌐 全部节点类型</option>
+                <option value="docker">🐳 仅 Docker 容器</option>
+                <option value="linux">🐧 仅 Linux 物理机 / 工作站</option>
+                <option value="proxy_on">⚡ 仅出海中节点</option>
+                <option value="proxy_off">🛑 仅原生直连节点</option>
+              </select>
+            </div>
+            <div class="node-stats-pill" id="node-stats-badge">共 4 个节点</div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th style="min-width: 170px;">业务节点名称</th>
+                  <th style="min-width: 200px;">终端访问地址 & 模式</th>
+                  <th style="min-width: 150px;">绑定出网网关</th>
+                  <th style="min-width: 180px;">出海通道开关</th>
+                  <th style="min-width: 140px; text-align: right;">运维操作</th>
+                </tr>
+              </thead>
+              <tbody id="top-clients-tbody">
+                <!-- 动态填充 -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- 代理网关池 CRUD -->
+        <section class="card">
+          <div class="card-header">
+            <div class="title-with-desc">
+              <h2>🖥️ 代理工作站网关池 (Gateway Pool)</h2>
+              <p class="card-subdesc">管理所有可用的代理网关服务器，支持自由设置默认网关、测试连通性与多对多分配</p>
+            </div>
+            <button class="btn btn-primary" id="top-add-gw-btn">
+              <span class="btn-icon">➕</span> 添加新网关节点
+            </button>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>网关名称</th>
+                  <th>IP / 主机名</th>
+                  <th>端口</th>
+                  <th>协议</th>
+                  <th>默认状态</th>
+                  <th>描述</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="top-gateways-tbody">
+                <!-- 动态填充 -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- 全局直连白名单 -->
+        <section class="card">
+          <div class="card-header">
+            <div class="title-with-desc">
+              <h2>🛡️ 局域网直连白名单规则 (NO_PROXY)</h2>
+              <p class="card-subdesc">命中以下名单的内网 IP 与域名将强制直接通信，严禁代理绕路，保证内网通信绝对安全</p>
+            </div>
+          </div>
+          <div class="noproxy-box">
+            <textarea id="top-noproxy-input" rows="3" class="form-textarea" placeholder="localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,*.local"></textarea>
+            <div class="noproxy-actions">
+              <button class="btn btn-primary btn-sm" id="top-save-noproxy-btn">
+                <span class="btn-icon">💾</span> 保存白名单规则
+              </button>
+              <span class="save-status-hint" id="top-noproxy-hint"></span>
+            </div>
+          </div>
+        </section>
+      </div>
+
+
+      <!-- ============================================================== -->
+      <!-- TAB 4: 📖 开发者手册 (Developer Handbook) -->
+      <!-- ============================================================== -->
+      <div class="tab-pane" id="tab-handbook">
+        <section class="card handbook-hero">
+          <div class="card-header">
+            <div class="title-with-desc">
+              <h2>📖 跨平台客户端开箱即用开发者速查手册</h2>
+              <p class="card-subdesc">基于 Python 3 标准库的轻量级纯净驱动，各平台开箱即用，任务退出自动注销</p>
+            </div>
+            <span class="tag tag-clean">纯原生标准库 · 零 pip 依赖 · 零环境污染</span>
+          </div>
+        </section>
+
+        <div class="handbook-grid">
+          <!-- Web 控制台一键开箱配方 (3分钟上手) -->
+          <div class="code-card full-width">
+            <div class="code-card-header">
+              <span class="os-pill" style="background:rgba(56,189,248,0.2);color:#38bdf8;">🚀 场景化 3 步极速开箱配方 (Web 界面操作)</span>
+              <button class="btn-copy" data-target="hb-code-web-recipes">复制代码</button>
+            </div>
+            <pre id="hb-code-web-recipes"><code># 【配方 1: 映射端口 Docker 容器 (如自定义映射 6600 端口的容器)】
+# 步骤: 点击 [➕ 登记新业务节点] -> 选 [🚀 通用 SSH 直连接入] -> IP: 192.168.1.102, 端口: 6600, 用户: root
+# 认证方式: 首次无公钥选 [🔒 初始账号密码]，系统自动建信并植入公钥，后续自动免密！
+# 开通出海: 保存后点击对应行的 [⚡ 开启]，容器内无需输入任何代理命令，直接出海！
+
+# 【配方 2: x86_64 / ARM64 Linux 物理工作站 / GPU 服务器 / 工控机】
+# 步骤: 点击 [➕ 登记新业务节点] -> 选 [🚀 通用 SSH 直连接入] -> 端口: 22 -> 认证方式: [🔑 SSH 密钥免密]
+# 开通出海: 保存后点击对应行的 [⚡ 开启]，终端直接执行 curl / git / pip 瞬间出海！
+
+# 【配方 3: 未暴露 SSH 的轻量 Docker 容器 (宿主机 docker exec 穿透)】
+# 步骤: 点击 [➕ 登记新业务节点] -> 选 [🐳 宿主机 Docker 穿透接入] -> 填容器名与宿主机 IP
+# 隔离保障: 仅该独立容器出海，宿主机与其余所有容器 100% 保持纯净直连，零环境污染！</code></pre>
+          </div>
+
+          <!-- 终端零命令极速验证 -->
+          <div class="code-card full-width">
+            <div class="code-card-header">
+              <span class="os-pill" style="background:rgba(34,197,94,0.2);color:#4ade80;">🎯 目标终端零命令出海检验 (无需 export 任何代理命令)</span>
+              <button class="btn-copy" data-target="hb-code-zero-cmd">复制代码</button>
+            </div>
+            <pre id="hb-code-zero-cmd"><code># 在目标工作站终端或 Docker 容器内，直接执行下列命令，返回 HTTP 200 即代表出海成功:
+curl -I https://www.google.com
+
+# 海外源码拉取与 Python 依赖安装:
+git clone https://github.com/octocat/Hello-World.git
+pip install requests openai</code></pre>
+          </div>
+
+          <!-- Linux Bash -->
+          <div class="code-card">
+            <div class="code-card-header">
+              <span class="os-pill linux">Linux 业务节点 (Bash, 186 / ARM64 / Ubuntu)</span>
+              <button class="btn-copy" data-target="hb-code-linux">复制代码</button>
+            </div>
+            <pre id="hb-code-linux"><code># 1. 单任务沙箱包装 (最推荐：命令结束代理立即销毁，环境保持纯净)
+./bin/with-proxy curl -I https://www.google.com
+./bin/with-proxy git clone https://github.com/octocat/Hello-World.git
+./bin/with-proxy pip install openai httpx
+
+# 2. 当前终端临时生效 (退出终端或执行 proxy-off 立即还原)
+source ./bin/proxy-on
+# 调试完成后还原环境:
+source ./bin/proxy-off</code></pre>
+          </div>
+
+          <!-- Windows PowerShell -->
+          <div class="code-card">
+            <div class="code-card-header">
+              <span class="os-pill win">Windows 开发者机 (PowerShell)</span>
+              <button class="btn-copy" data-target="hb-code-win-ps">复制代码</button>
+            </div>
+            <pre id="hb-code-win-ps"><code># 1. 单任务沙箱包装 (推荐)
+.\bin\with-proxy.ps1 curl.exe -I https://www.google.com
+.\bin\with-proxy.ps1 git clone https://github.com/octocat/Hello-World.git
+
+# 2. 当前 PowerShell 会话临时生效
+. .\bin\proxy-on.ps1
+# 退出注销
+. .\bin\proxy-off.ps1</code></pre>
+          </div>
+
+          <!-- Windows CMD -->
+          <div class="code-card">
+            <div class="code-card-header">
+              <span class="os-pill win">Windows 经典终端 (CMD)</span>
+              <button class="btn-copy" data-target="hb-code-win-cmd">复制代码</button>
+            </div>
+            <pre id="hb-code-win-cmd"><code>rem 单任务沙箱包装
+bin\with-proxy.cmd curl.exe -I https://www.google.com
+bin\with-proxy.cmd git clone https://github.com/octocat/Hello-World.git</code></pre>
+          </div>
+
+          <!-- 跨平台 Python CLI -->
+          <div class="code-card">
+            <div class="code-card-header">
+              <span class="os-pill py">跨平台 Python 通用命令行 (Win / Linux / macOS)</span>
+              <button class="btn-copy" data-target="hb-code-py-cli">复制代码</button>
+            </div>
+            <pre id="hb-code-py-cli"><code># 任何安装有 Python 3 的操作系统均可通用执行:
+python with_proxy.py curl -I https://www.google.com
+
+# 显式指定临时网关
+python with_proxy.py --gateway 192.168.1.100:7890 git clone ...</code></pre>
+          </div>
+
+          <!-- Python Native SDK -->
+          <div class="code-card full-width">
+            <div class="code-card-header">
+              <span class="os-pill py">Python 业务代码集成 SDK (零第三方包依赖，纯原生 Context Manager)</span>
+              <button class="btn-copy" data-target="hb-code-py-sdk">复制代码</button>
+            </div>
+            <pre id="hb-code-py-sdk"><code>from sdk.proxy_session import ProxySession
+
+# 进入 with 作用域自动挂载代理，离开作用域 (无论正常返回还是抛出异常) 强制销毁代理
+with ProxySession():
+    import urllib.request
+    resp = urllib.request.urlopen("https://api.github.com/zen")
+    print("GitHub Zen:", resp.read().decode())
+
+# 支持显式指定特定网关 (多对多按需切换)
+with ProxySession(gateway="192.168.1.100:7890"):
+    # 在此作用域内走指定工作站代理通道
+    pass</code></pre>
+          </div>
+
+          <!-- Docker 容器精准接入 (Zero Pollution) -->
+          <div class="code-card full-width">
+            <div class="code-card-header">
+              <span class="os-pill docker">Docker 独立容器精准代理 (仅目标容器出海，宿主机与其他容器 0 影响)</span>
+              <button class="btn-copy" data-target="hb-code-docker-wrapper">复制代码</button>
+            </div>
+            <pre id="hb-code-docker-wrapper"><code># 1. 进入指定容器的交互终端 (自动注入出海代理，退出即还原)
+./bin/with-proxy-docker app-container /bin/bash
+
+# 2. 在指定容器内单任务沙箱运行 (不修改容器镜像，任务结束代理即刻销毁)
+./bin/with-proxy-docker app-container curl -I https://www.google.com
+./bin/with-proxy-docker app-container git clone https://github.com/octocat/Hello-World.git
+./bin/with-proxy-docker app-container pip install openai httpx
+
+# 3. 隔离性保证：
+# 宿主机环境：env | grep -i proxy 依然为空，宿主机直连无任何污染
+# 其他容器：docker exec other-container 没有 -e 代理，100% 原始直连网络</code></pre>
+          </div>
+
+          <!-- Docker 容器构建与运行按需代理 -->
+          <div class="code-card full-width">
+            <div class="code-card-header">
+              <span class="os-pill docker">Docker 容器构建镜像按需代理 (仅在 build 阶段有效)</span>
+              <button class="btn-copy" data-target="hb-code-docker">复制代码</button>
+            </div>
+            <pre id="hb-code-docker"><code># 临时构建镜像 (仅在 build 阶段注入代理，不污染镜像内部网络)
+docker build \
+    --build-arg HTTP_PROXY=http://192.168.1.100:7890 \
+    --build-arg HTTPS_PROXY=http://192.168.1.100:7890 \
+    --build-arg NO_PROXY="localhost,127.0.0.1,192.168.0.0/16" \
+    -t my-app .
+
+# 临时容器运行 (--rm 容器退出自动销毁)
+docker run --rm \
+    -e HTTP_PROXY=http://192.168.1.100:7890 \
+    -e HTTPS_PROXY=http://192.168.1.100:7890 \
+    my-app python main.py</code></pre>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- 页脚 -->
+    <footer class="app-footer">
+      <span>Net-Proxy-Tool v1.3.0 · 通用跨平台局域网出海与 Docker 容器隔离控制系统 · 纯 Python 原生零依赖</span>
+      <span>当前出网网关: <strong id="footer-gw-label">192.168.1.100:7890</strong></span>
+    </footer>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- 模态弹窗: 登记/编辑业务节点 -->
+  <!-- ============================================================== -->
+  <div class="modal-overlay" id="modal-client" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-client-title">➕ 登记新业务节点</h3>
+        <button class="modal-close-btn" id="modal-client-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="form-client-mode" value="add">
+        <div class="form-row">
+          <div class="form-group half">
+            <label>业务节点名称 *:</label>
+            <input type="text" id="form-client-name" class="form-input" placeholder="例如: 202 视觉检测服务器 / 70 容器 debug2">
+          </div>
+          <div class="form-group half">
+            <label>节点唯一标识 (ID, 留空自动生成):</label>
+            <input type="text" id="form-client-id" class="form-input" placeholder="例如: node-worker-202">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group half">
+            <label>操作系统架构:</label>
+            <select id="form-client-os" class="form-select">
+              <option value="linux">Linux 物理工作站 / 虚拟机 / 边缘设备</option>
+              <option value="docker">Docker 容器 (独立环境)</option>
+              <option value="windows">Windows 本机 / 开发机</option>
+              <option value="macos">macOS 工作站</option>
+            </select>
+          </div>
+          <div class="form-group half">
+            <label>绑定默认出网网关:</label>
+            <select id="form-client-gw" class="form-select"></select>
+          </div>
+        </div>
+
+        <!-- 接入通道选择 -->
+        <div class="form-group">
+          <label>节点运维与下发通道 *:</label>
+          <select id="form-client-access-mode" class="form-select">
+            <option value="ssh">🚀 通用 SSH 直连接入 (推荐：支持物理工作站、工控机、边缘设备及映射端口容器)</option>
+            <option value="docker_host">🐳 宿主机 Docker 穿透接入 (向下兼容：适用于未暴露 SSH 的轻量微服务容器)</option>
+          </select>
+        </div>
+
+        <!-- 通道 A: 通用 SSH 直连接入参数 -->
+        <div id="section-access-ssh" class="access-subpanel">
+          <div class="form-row">
+            <div class="form-group" style="flex: 2;">
+              <label>主机 IP 或内网域名 *:</label>
+              <input type="text" id="form-client-host" class="form-input" placeholder="例如: 192.168.1.101 或 10.0.0.12">
+            </div>
+            <div class="form-group" style="flex: 1;">
+              <label>SSH 端口 *:</label>
+              <input type="number" id="form-client-port" class="form-input" value="22" placeholder="工作站22, 容器填映射端口如6600">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group half">
+              <label>SSH 登录用户名 *:</label>
+              <input type="text" id="form-client-ssh-user" class="form-input" placeholder="例如: ubuntu, root, developer">
+            </div>
+            <div class="form-group half">
+              <label>SSH 认证方式:</label>
+              <select id="form-client-auth-type" class="form-select">
+                <option value="key">🔑 SSH 密钥免密 (默认推荐，已有公钥信任)</option>
+                <option value="password">🔒 初始账号密码 (支持未配密钥的新机器，自动植入公钥)</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group" id="form-group-client-pass" style="display: none;">
+            <label>SSH 登录密码 (初次建信自愈使用):</label>
+            <input type="password" id="form-client-ssh-pass" class="form-input" placeholder="输入节点初始密码 (如: ubuntu 或 root)">
+            <div class="input-tip-sub">💡 工业场景免密自愈：首次输入密码连通后，系统将自动把控制节点公钥植入目标机器，后续所有操作彻底零密码！</div>
+          </div>
+        </div>
+
+        <!-- 通道 B: 宿主机 Docker 穿透参数 -->
+        <div id="section-access-docker-host" class="access-subpanel" style="display: none;">
+          <div class="form-group">
+            <label>Docker 容器内部名称 *:</label>
+            <input type="text" id="form-client-container" class="form-input" placeholder="例如: app-container">
+          </div>
+          <div class="form-row">
+            <div class="form-group half">
+              <label>宿主机 IP 地址 *:</label>
+              <input type="text" id="form-client-ssh-host" class="form-input" placeholder="例如: 192.168.1.102">
+            </div>
+            <div class="form-group half">
+              <label>宿主机免密用户名 *:</label>
+              <input type="text" id="form-client-ssh-user-host" class="form-input" value="ubuntu" placeholder="例如: ubuntu">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>业务标签 (逗号分隔):</label>
+          <input type="text" id="form-client-tags" class="form-input" placeholder="例如: Linux, GPU, 深度学习, Docker, 边缘AI">
+        </div>
+        <div class="form-group">
+          <label>节点描述备注:</label>
+          <input type="text" id="form-client-desc" class="form-input" placeholder="例如: 深度学习训练集群或研发测试机">
+        </div>
+        <div class="form-hint" id="form-client-hint"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="modal-client-test-btn">
+          <span class="btn-icon">⚡</span> 预检主机连通性
+        </button>
+        <button class="btn btn-primary" id="modal-client-save-btn">
+          <span class="btn-icon">💾</span> 保存节点
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- 模态弹窗: 添加/编辑代理网关 -->
+  <!-- ============================================================== -->
+  <div class="modal-overlay" id="modal-gateway" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-gw-title">➕ 添加新代理网关</h3>
+        <button class="modal-close-btn" id="modal-gw-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="form-gw-mode" value="add">
+        <div class="form-group">
+          <label>网关唯一标识 (ID, 留空自动生成):</label>
+          <input type="text" id="form-gw-id" class="form-input" placeholder="例如: gw-office-01">
+        </div>
+        <div class="form-group">
+          <label>网关名称 *:</label>
+          <input type="text" id="form-gw-name" class="form-input" placeholder="例如: 研发中心出海网关">
+        </div>
+        <div class="form-row">
+          <div class="form-group two-thirds">
+            <label>服务器 IP / 域名 *:</label>
+            <input type="text" id="form-gw-host" class="form-input" placeholder="例如: 192.168.1.100">
+          </div>
+          <div class="form-group one-third">
+            <label>端口 *:</label>
+            <input type="number" id="form-gw-port" class="form-input" value="7890">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>协议类型:</label>
+          <select id="form-gw-protocol" class="form-select">
+            <option value="http">HTTP / HTTPS 代理</option>
+            <option value="socks5">SOCKS5 代理</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>描述说明:</label>
+          <input type="text" id="form-gw-desc" class="form-input" placeholder="例如: Ubuntu 3090 局域网出海网关">
+        </div>
+        <div class="form-hint" id="form-gw-hint"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="modal-gw-test-btn">
+          <span class="btn-icon">⚡</span> 测试端口连通性
+        </button>
+        <button class="btn btn-primary" id="modal-gw-save-btn">
+          <span class="btn-icon">💾</span> 保存网关
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- 模态弹窗: 📜 操作审计日志流水 -->
+  <!-- ============================================================== -->
+  <div class="modal-overlay" id="modal-audit" style="display:none;">
+    <div class="modal-card modal-large">
+      <div class="modal-header">
+        <h3>📜 节点出海操作审计与事件流水</h3>
+        <button class="modal-close-btn" id="modal-audit-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="audit-toolbar">
+          <span class="audit-subdesc">精准追溯节点启停出海、一键关断直连、节点配置增删改与系统全网巡检 (最新 60 条记录)</span>
+          <button class="btn btn-secondary btn-sm" id="modal-audit-refresh-btn">🔄 刷新流水</button>
+        </div>
+        <div class="table-responsive" style="max-height: 420px; overflow-y: auto;">
+          <table class="data-table audit-table">
+            <thead>
+              <tr>
+                <th style="min-width: 150px;">记录时间</th>
+                <th style="min-width: 130px;">操作类型</th>
+                <th style="min-width: 140px;">目标节点</th>
+                <th style="min-width: 80px;">结果</th>
+                <th style="min-width: 260px;">事件详情 / 提示</th>
+              </tr>
+            </thead>
+            <tbody id="audit-table-tbody">
+              <!-- 动态填充 -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="modal-audit-close-btn">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=1.3.0"></script>
+</body>
+</html>

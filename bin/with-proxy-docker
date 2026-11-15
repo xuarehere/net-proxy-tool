@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# net-proxy-tool: Dedicated Docker Container Proxy Wrapper
+# 精准只对指定容器注入代理，宿主机本身与其它容器 100% 保持直连不受影响
+set -e
+
+TOOL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [ $# -lt 2 ]; then
+    echo "=========================================================================="
+    echo " net-proxy-tool: Docker 容器精准代理执行器"
+    echo " 仅对目标容器生效，宿主机与其他容器绝对零污染"
+    echo "=========================================================================="
+    echo "用法: $0 <容器名称或ID> <待执行命令...>"
+    echo ""
+    echo "示例 1 (进入该容器交互式终端，带出海通道):"
+    echo "  $0 app-container /bin/bash"
+    echo ""
+    echo "示例 2 (单任务沙箱运行，执行完毕代理立即销毁):"
+    echo "  $0 app-container curl -I https://www.google.com"
+    echo "  $0 app-container pip install openai httpx"
+    echo "  $0 app-container git clone https://github.com/octocat/Hello-World.git"
+    echo "=========================================================================="
+    exit 1
+fi
+
+CONTAINER="$1"
+shift
+
+# 从 config.json 解析当前活跃网关与 no_proxy 白名单 (纯标准库，无需 jq)
+PARSED_ENV=$(python3 -c "
+import json
+from pathlib import Path
+
+cfg_file = Path('${TOOL_DIR}') / 'config.json'
+if not cfg_file.exists():
+    cfg_file = Path('${TOOL_DIR}') / 'config.example.json'
+gw_host, gw_port = '127.0.0.1', 7890
+no_proxy = 'localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.local'
+
+if cfg_file.exists():
+    try:
+        with open(cfg_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            active_id = data.get('active_gateway_id')
+            for g in data.get('gateways', []):
+                if g.get('id') == active_id:
+                    gw_host = g.get('host', gw_host)
+                    gw_port = g.get('port', gw_port)
+                    break
+            no_proxy = data.get('no_proxy', no_proxy)
+    except Exception:
+        pass
+
+proxy_url = f'http://{gw_host}:{gw_port}'
+print(f'{proxy_url}|{no_proxy}')
+")
+
+PROXY_URL=$(echo "$PARSED_ENV" | cut -d'|' -f1)
+NO_PROXY_VAL=$(echo "$PARSED_ENV" | cut -d'|' -f2)
+
+# 判断是否需要 -it (根据当前终端是否为 TTY)
+DOCKER_FLAGS=""
+if [ -t 0 ] && [ -t 1 ]; then
+    DOCKER_FLAGS="-it"
+fi
+
+# 执行 docker exec，仅在该次进程上下文注入环境变量
+exec docker exec $DOCKER_FLAGS \
+    -e HTTP_PROXY="${PROXY_URL}" \
+    -e HTTPS_PROXY="${PROXY_URL}" \
+    -e http_proxy="${PROXY_URL}" \
+    -e https_proxy="${PROXY_URL}" \
+    -e NO_PROXY="${NO_PROXY_VAL}" \
+    -e no_proxy="${NO_PROXY_VAL}" \
+    "${CONTAINER}" "$@"

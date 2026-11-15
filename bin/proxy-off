@@ -1,0 +1,4 @@
+# net-proxy-tool: Linux session proxy deactivator
+# 必须使用 source ./bin/proxy-off 调用
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY
+echo "🛑 [net-proxy-tool] 当前终端会话代理已彻底注销，环境恢复纯净状态"

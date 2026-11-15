@@ -1,0 +1,43 @@
+# ==============================================================
+# net-proxy-tool: 生产运行期私有数据与敏感配置隔离 (Strict Git Ignore)
+# ==============================================================
+
+# 运行期私有配置文件 (严禁提交到公开版本库，仅保留 config.example.json 作为模版)
+config.json
+
+# 运行期安全操作审计日志流水
+data/audit.log
+data/*.log
+*.log
+
+# 进程锁与 PID 文件
+*.pid
+web/*.pid
+web/*.log
+
+# Python 字节码、编译缓存与打包生成物
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+*.egg
+
+# 操作系统与通用 IDE 配置
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 临时测试生成物与临时沙箱
+test_temp/
+scratch/
+browser_sandbox/

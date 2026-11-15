@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "net-proxy-tool"
+version = "1.3.0"
+description = "Universal cross-platform proxy orchestrator and Docker container network isolation suite"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "xuarehere" }
+]
+keywords = [
+    "proxy",
+    "docker",
+    "ssh",
+    "cross-platform",
+    "networking",
+    "developer-tools",
+    "zero-dependencies"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Networking",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/xuarehere/net-proxy-tool"
+Documentation = "https://github.com/xuarehere/net-proxy-tool#readme"
+Issues = "https://github.com/xuarehere/net-proxy-tool/issues"
+
+[project.scripts]
+with-proxy = "with_proxy:main"
+net-proxy-tool = "web.server:main"
