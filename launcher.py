@@ -74,6 +74,24 @@ def owns_console(state):
     return status.get("instance_id") == expected and status.get("pid") == state["pid"]
 
 
+def wait_for_windows_exit(pid):
+    """Windows keeps inherited log handles open until process exit."""
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+    if handle:
+        try:
+            if kernel.WaitForSingleObject(handle, 5000) == 258:  # WAIT_TIMEOUT
+                raise ValueError("The console is still exiting. Retry in a few seconds.")
+        finally:
+            kernel.CloseHandle(handle)
+
+
 def stop(state, state_path):
     if not owns_console(state):
         print("No running console for this configuration.")
@@ -86,6 +104,9 @@ def stop(state, state_path):
         if time.monotonic() >= deadline:
             raise ValueError("Shutdown timed out. Check console.log.")
         time.sleep(0.1)
+    if os.name == "nt":
+        for pid in {state["pid"], state.get("launcher_pid", state["pid"])}:
+            wait_for_windows_exit(pid)
     state_path.unlink(missing_ok=True)
     print("Console stopped.")
 
@@ -110,11 +131,11 @@ def start(port, directory, state, state_path):
     instance_id = hashlib.sha256(token.encode()).hexdigest()
     launched = False
     try:
-        deadline = time.monotonic() + 12
+        deadline = time.monotonic() + 20
         while proc.poll() is None:
             status = health(port)
             if status.get("instance_id") == instance_id and request(port, "/"):
-                atomic_json(state_path, {"port": port, "pid": status["pid"], "token": token})
+                atomic_json(state_path, {"port": port, "pid": status["pid"], "launcher_pid": proc.pid, "token": token})
                 launched = True
                 return
             if time.monotonic() >= deadline:

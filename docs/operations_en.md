@@ -49,6 +49,7 @@ Open `http://127.0.0.1:8899/` on the host. Stop with `docker compose down`. Insi
 
 | Symptom | Check |
 | --- | --- |
+| Windows reports that `roxy-tool` or `2` is not a command | Extract the entire v1.4.0 Windows ZIP into a new directory and use its root `Start.bat`. The older UTF-8/LF batch file could parse incorrectly under code page 936. |
 | No page after double-click | Extract all files and check the architecture. Run the launcher in a terminal to see the error. Open the printed URL if needed. |
 | Port 8899 is occupied | Try a free port such as 8900. To stop a running instance for this configuration, use the same launcher with `--stop`. |
 | The console opens but the proxy test fails | Verify the listening address and HTTP/mixed port. For a failed TCP connection, check the proxy service, interface and firewall. If TCP works, check protocol, upstream route and target. |

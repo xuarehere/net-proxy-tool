@@ -6,7 +6,11 @@ if [[ -z ${_npt_active:-} ]]; then
     for _npt_key in http_proxy HTTP_PROXY https_proxy HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY; do
         if [[ -n ${!_npt_key+x} ]]; then
             printf -v _npt_value '%q' "${!_npt_key}"
-            _npt_restore+="export ${_npt_key}=${_npt_value};"
+            if [[ $(declare -p "$_npt_key") =~ ^declare[[:space:]]-[^[:space:]]*x ]]; then
+                _npt_restore+="export ${_npt_key}=${_npt_value};"
+            else
+                _npt_restore+="export -n ${_npt_key}=${_npt_value};"
+            fi
         else
             _npt_restore+="unset ${_npt_key};"
         fi

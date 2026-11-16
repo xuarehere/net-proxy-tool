@@ -5,7 +5,8 @@ Multi-Gateway, Multi-Node Topology, Dynamic CRUD & Progressive Guided Sandbox Ex
 Zero third-party dependencies (pure Python 3 standard library).
 """
 from concurrent.futures import ThreadPoolExecutor
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer as HTTPServer
+from socketserver import TCPServer
 import argparse
 import hashlib
 import hmac
@@ -37,6 +38,14 @@ if __package__ in (None, ""):
 from sdk.config import data_dir, load_config, resolve_gateway_info, save_config
 
 CONFIG_WRITE_LOCK = threading.RLock()
+
+
+class ThreadingHTTPServer(HTTPServer):
+    def server_bind(self):
+        # HTTPServer resolves its own hostname, which can block on reverse DNS
+        # even when binding loopback. The console only needs the numeric address.
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 def audit_path():

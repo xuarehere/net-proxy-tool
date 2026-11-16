@@ -6,6 +6,9 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+env:
+  PYTHONUTF8: '1'
+  PYTHONIOENCODING: utf-8
 permissions:
   contents: read
 jobs:
@@ -48,6 +51,9 @@ jobs:
             tar -xzf dist/*.tar.gz -C "build/中文 Portable"
           fi
           python -X utf8 packaging/smoke.py "build/中文 Portable/net-proxy-tool" --browser
+      - name: Record Gatekeeper and quarantined first launch
+        if: runner.os == 'macOS'
+        run: python packaging/macos_gatekeeper.py "build/中文 Portable/net-proxy-tool"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}

@@ -1,5 +1,7 @@
 # net-proxy-tool
 
+[![Release checks](https://github.com/xuarehere/net-proxy-tool/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/xuarehere/net-proxy-tool/actions/workflows/ci.yml) · [GitHub Releases](https://github.com/xuarehere/net-proxy-tool/releases/latest)
+
 [English](README_EN.md) · [快速上手](QUICKSTART.md) · [运维与排障](docs/operations.md) · [版本记录](CHANGELOG.md)
 
 通过本机 Web 控制台，把一个命令、Python 任务或指定的远程节点接到你已有的 HTTP 代理。可以先在浏览器里验证代理能否访问目标网站，再决定哪些任务使用它。
@@ -13,6 +15,8 @@
 | macOS | [Intel · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.0/net-proxy-tool-macos-x64.tar.gz) | `./net-proxy-tool` |
 | Linux · glibc | [x86_64 · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.0/net-proxy-tool-linux-x64.tar.gz) | `./net-proxy-tool` |
 | Linux · glibc | [ARM64 · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.0/net-proxy-tool-linux-arm64.tar.gz) | `./net-proxy-tool` |
+
+发行测试运行于 Windows x64、macOS 15（Intel 和 Apple Silicon）、Ubuntu 24.04（x64 和 ARM64），并覆盖 Ubuntu 22.04、24.04 与 Debian 12 的干净 x64 容器。Alpine/musl 环境可使用 [Docker Compose](docs/operations.md)。
 
 1. **完整解压**下载包，进入其中的 `net-proxy-tool` 目录。Windows 双击 `Start.bat`，macOS 或 Linux 在该目录运行 `./net-proxy-tool`。发布包自带 Python。
 2. 浏览器打开本地控制台。填写已有代理的**主机和 HTTP 或混合端口**，然后保存。代理客户端若运行在同一台电脑上，主机通常填 `127.0.0.1`；端口请从客户端设置中读取。

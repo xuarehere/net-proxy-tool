@@ -9,6 +9,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from macos_gatekeeper import report as gatekeeper_report
 from smoke import run
 
 
@@ -50,6 +51,7 @@ def main():
             with tarfile.open(archive) as package:
                 package.extractall(directory, filter="data")
         run(directory / "net-proxy-tool", browser=True)
+        gatekeeper_report(directory / "net-proxy-tool")
 
 
 if __name__ == "__main__":
