@@ -66,8 +66,16 @@ def read_state(path):
         return {}
 
 
+def owns_console(state):
+    if not state:
+        return False
+    expected = hashlib.sha256(state["token"].encode()).hexdigest()
+    status = health(state["port"])
+    return status.get("instance_id") == expected and status.get("pid") == state["pid"]
+
+
 def stop(state, state_path):
-    if not state or health(state["port"]).get("pid") != state["pid"]:
+    if not owns_console(state):
         print("No running console for this configuration.")
         state_path.unlink(missing_ok=True)
         return
@@ -83,7 +91,7 @@ def stop(state, state_path):
 
 
 def start(port, directory, state, state_path):
-    if state and health(state["port"]).get("pid") == state["pid"]:
+    if owns_console(state):
         if port != state["port"]:
             raise ValueError(f"Console already uses port {state['port']}. Stop it before changing ports.")
         return

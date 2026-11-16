@@ -77,6 +77,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const formClientSshPass = document.getElementById("form-client-ssh-pass");
   const formClientContainer = document.getElementById("form-client-container");
   const formClientSshUser = document.getElementById("form-client-ssh-user");
+  const formClientHostPort = document.getElementById("form-client-host-port");
   const formClientSshHost = document.getElementById("form-client-ssh-host");
   const formClientSshUserHost = document.getElementById("form-client-ssh-user-host");
 
@@ -234,8 +235,9 @@ document.addEventListener("DOMContentLoaded", () => {
       setupResult.textContent = [stage, status, data.code && ("HTTP " + data.code),
         data.latency_ms != null && (data.latency_ms + " ms"), data.error].filter(Boolean).join(" · ");
       if (data.online) {
-        setupCommand.textContent = "单命令用法：python with_proxy.py --gateway " +
-          (setupHost.value.includes(":") ? "[" + setupHost.value + "]" : setupHost.value) + ":" + setupPort.value + " <命令>";
+        const curl = navigator.platform.startsWith("Win") ? "curl.exe" : "curl";
+        const host = setupHost.value.includes(":") ? "[" + setupHost.value + "]" : setupHost.value;
+        setupCommand.textContent = curl + ' --proxy "http://' + host + ':' + setupPort.value + '" --head https://example.com/';
         setupCommand.hidden = false;
       }
     } catch (error) {
@@ -322,7 +324,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Step 1: 探测网关
   wizardTestGwBtn.addEventListener("click", async () => {
-    if (!selectedWizardGateway) return;
+    if (!selectedWizardGateway) { setupHost.focus(); return; }
     wizardTestGwBtn.disabled = true;
     wizardTestGwBtn.innerHTML = '<span class="btn-icon">⏳</span> 正在探测网关...';
     step1Result.className = "step-result-banner";
@@ -340,7 +342,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await res.json();
       if (data.online) {
         step1Result.className = "step-result-banner success";
-        step1Result.innerHTML = `<strong>✅ 连通成功！</strong> 网关 ${selectedWizardGateway.name} (${selectedWizardGateway.host}:${selectedWizardGateway.port}) 响应正常，延迟: <strong>${data.latency_ms} ms</strong>。已自动为您解锁步骤 2。`;
+        step1Result.innerHTML = `<strong>✅ 连通成功！</strong> 网关 ${escapeHtml(selectedWizardGateway.name)} (${escapeHtml(selectedWizardGateway.host)}:${selectedWizardGateway.port}) 响应正常，延迟: <strong>${data.latency_ms} ms</strong>。已自动为您解锁步骤 2。`;
         statusTagStep1.className = "step-status-tag success";
         statusTagStep1.textContent = "✅ 已就绪";
         pipeStep1.className = "pipeline-step completed";
@@ -350,13 +352,13 @@ document.addEventListener("DOMContentLoaded", () => {
         unlockStep2();
       } else {
         step1Result.className = "step-result-banner error";
-        step1Result.innerHTML = `<strong>代理请求失败</strong> ${data.error}。请检查网关是否启动 Clash 并配置了 <code>allow-lan: true</code>。`;
+        step1Result.textContent = "代理请求失败：" + (data.error || "请检查代理地址和监听端口");
         statusTagStep1.className = "step-status-tag";
         statusTagStep1.textContent = "❌ 连通失败";
       }
     } catch (err) {
       step1Result.className = "step-result-banner error";
-      step1Result.innerHTML = `<strong>请求异常:</strong> ${err.message}`;
+      step1Result.textContent = "请求异常：" + err.message;
     } finally {
       wizardTestGwBtn.disabled = false;
       wizardTestGwBtn.innerHTML = '<span class="btn-icon">⚡</span> 探测该网关连通性';
@@ -481,7 +483,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       });
 
-      if (onlineCount >= 2) {
+      if (results.length && onlineCount >= Math.min(2, results.length)) {
         step3Complete = true;
         statusTagStep3.className = "step-status-tag success";
         statusTagStep3.textContent = `✅ 穿透达标 (${onlineCount}/${results.length} 在线)`;
@@ -493,7 +495,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         statusTagStep3.className = "step-status-tag";
         statusTagStep3.textContent = `⚠️ 穿透异常 (${onlineCount}/${results.length} 在线)`;
-        alert("大部分境外目标站点未能通过代理访问，请检查 183 网关的节点配置或网络策略。");
+        alert("大部分境外目标站点未能通过代理访问，请检查所选网关的节点配置或网络策略。");
       }
     } catch (err) {
       statusTagStep3.textContent = "❌ 诊断请求异常";
@@ -549,148 +551,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
     handoverBlocksContainer.innerHTML = "";
 
-    const hostUrl = window.location.host || (window.location.hostname ? `${window.location.hostname}:8899` : "127.0.0.1:8899");
-
-    if (osType === "docker") {
-      // Docker 容器专属交付指令 (100% 容器内部自主控制，隔离宿主机)
-      const cName = client.container_name || (client.id ? client.id.replace("node-", "") : "app-container");
-      handoverBlocksContainer.innerHTML = `
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 1: 在容器内部直接初始化独立代理开关 (最推荐：纯容器内自主操作，宿主机 0 影响)</span>
-            <button class="btn-copy" data-copy="curl -s http://${hostUrl}/container-init.sh | bash">复制代码</button>
-          </div>
-          <pre><code># 1. 直接在【容器内部】运行一次初始化命令 (自动就绪 proxy-on / proxy-off):
-curl -s http://${hostUrl}/container-init.sh | bash
-
-# 2. 从此在容器终端中可随时自主开启/关闭出海 (仅在当前容器生效，宿主机完全隔离):
-proxy-on           # 开启出海代理 (走 183 网关)
-proxy-off          # 关闭出海代理 (恢复直连)
-proxy-status       # 查看代理开关状态
-with-proxy &lt;命令&gt;  # 单次命令走代理 (如: with-proxy pip install openai)</code></pre>
-        </div>
-
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 2: 在容器内部临时一键开启/关闭 (零安装，当前 bash 窗口生效)</span>
-            <button class="btn-copy" data-copy="source &lt;(curl -s http://${hostUrl}/proxy-on)">复制代码</button>
-          </div>
-          <pre><code># 在容器内部任何终端中直接执行:
-# 开启出海:
-source &lt;(curl -s http://${hostUrl}/proxy-on)
-
-# 关闭出海:
-source &lt;(curl -s http://${hostUrl}/proxy-off)</code></pre>
-        </div>
-
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 3: 从 70 宿主机外部开关 (无需进入容器)</span>
-            <button class="btn-copy" data-copy="./bin/docker-proxy on ${cName}">复制代码</button>
-          </div>
-          <pre><code># 若处于 70 宿主机，也可直接外部开关该容器:
-./bin/docker-proxy on ${cName}      # 开启该容器代理
-./bin/docker-proxy off ${cName}     # 关闭该容器代理
-./bin/docker-proxy exec ${cName} /bin/bash  # 单次带代理进入容器终端</code></pre>
-        </div>
-      `;
-    } else if (osType === "windows") {
-      // Windows 交互命令
-      handoverBlocksContainer.innerHTML = `
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 1: 单任务进程沙箱包装执行 (执行完毕环境变量即刻销毁，最推荐)</span>
-            <button class="btn-copy" data-copy=".\\bin\\with-proxy.ps1 curl.exe -I https://www.google.com">复制代码</button>
-          </div>
-          <pre><code># PowerShell 执行任何命令 (自动注入 183 代理网关，任务完成即刻彻底清理):
-.\\bin\\with-proxy.ps1 curl.exe -I https://www.google.com
-.\\bin\\with-proxy.ps1 git clone https://github.com/octocat/Hello-World.git
-.\\bin\\with-proxy.ps1 pip install openai
-
-# 经典 CMD 终端执行:
-bin\\with-proxy.cmd curl.exe -I https://www.google.com</code></pre>
-        </div>
-
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 2: 当前 PowerShell 会话临时生效 (关闭终端窗口或注销即还原)</span>
-            <button class="btn-copy" data-copy=". .\\bin\\proxy-on.ps1">复制代码</button>
-          </div>
-          <pre><code># 临时挂载代理:
-. .\\bin\\proxy-on.ps1
-
-# 调试完毕后一键注销，恢复纯净环境:
-. .\\bin\\proxy-off.ps1</code></pre>
-        </div>
-
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 3: Python 代码零污染上下文管理器 (纯标准库，退出代码块自动清除)</span>
-            <button class="btn-copy" data-copy="from sdk.proxy_session import ProxySession&#10;with ProxySession():&#10;    # 你的业务代码">复制代码</button>
-          </div>
-          <pre><code>from sdk.proxy_session import ProxySession
-
-with ProxySession():
-    import urllib.request
-    resp = urllib.request.urlopen("https://www.google.com")
-    print("Google Status:", resp.getcode())</code></pre>
-        </div>
-      `;
+    let command;
+    let title;
+    if (osType === "windows") {
+      title = "在 Windows 源码目录中运行单次代理请求";
+      command = ".\\bin\\with-proxy.cmd curl.exe -I https://example.com/";
     } else {
-      // Linux / macOS 交互命令
-      handoverBlocksContainer.innerHTML = `
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 1: 任意路径免进入一键生效 (最推荐：利用控制台端点直接注入，杜绝路径报错)</span>
-            <button class="btn-copy" data-copy="source &lt;(curl -s http://${hostUrl}/proxy-on)">复制代码</button>
-          </div>
-          <pre><code># 在 186 或任意 Linux 机器的【任何目录】下直接执行 (无需先 cd 到工具目录):
-# 开启出海代理:
-source &lt;(curl -s http://${hostUrl}/proxy-on)
-
-# 关闭出海代理 (恢复直连):
-source &lt;(curl -s http://${hostUrl}/proxy-off)</code></pre>
-        </div>
-
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 2: 本地脚本会话级开关 (明确进入工具目录，杜绝 No such file 报错)</span>
-            <button class="btn-copy" data-copy="cd ~/net-proxy-tool && source bin/proxy-on">复制代码</button>
-          </div>
-          <pre><code># 明确指定目录进入执行:
-cd ~/net-proxy-tool && source bin/proxy-on
-
-# 调试完毕后一键注销，恢复纯净环境:
-cd ~/net-proxy-tool && source bin/proxy-off
-
-# 提示: 执行一次 ./install-cli.sh 后，在任何目录直接输入 proxy-on 即可全局生效！</code></pre>
-        </div>
-
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 3: 单任务进程沙箱包装执行 (任务完成即刻彻底清理)</span>
-            <button class="btn-copy" data-copy="~/net-proxy-tool/bin/with-proxy curl -I https://www.google.com">复制代码</button>
-          </div>
-          <pre><code># 使用绝对路径执行单任务 (自动走 ${gw.host}:${gw.port} 网关，任务退出环境自动销毁):
-~/net-proxy-tool/bin/with-proxy curl -I https://www.google.com
-~/net-proxy-tool/bin/with-proxy git clone https://github.com/octocat/Hello-World.git
-~/net-proxy-tool/bin/with-proxy pip install openai httpx</code></pre>
-        </div>
-
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 4: Python 代码零污染上下文管理器 (纯标准库，退出代码块自动清除)</span>
-            <button class="btn-copy" data-copy="from sdk.proxy_session import ProxySession&#10;with ProxySession():&#10;    # 业务代码">复制代码</button>
-          </div>
-          <pre><code>from sdk.proxy_session import ProxySession
-
-with ProxySession():
-    import urllib.request
-    resp = urllib.request.urlopen("https://www.google.com")
-    print("Google Status:", resp.getcode())</code></pre>
-        </div>
-      `;
+      title = "开启节点代理后，在目标工作站或容器内验证";
+      command = "curl -I https://example.com/";
     }
+    const card = document.createElement("div");
+    card.className = "code-delivery-card";
+    card.innerHTML = '<div class="code-delivery-header"><span class="code-delivery-title"></span><button class="btn-copy">复制代码</button></div><pre><code></code></pre>';
+    card.querySelector(".code-delivery-title").textContent = title;
+    card.querySelector("code").textContent = command;
+    card.querySelector(".btn-copy").dataset.copy = command;
+    handoverBlocksContainer.appendChild(card);
 
     // 绑定复制按钮
     attachCopyButtons(handoverBlocksContainer);
@@ -952,7 +828,7 @@ with ProxySession():
       const gwName = boundGw ? `${boundGw.name}` : (c.bound_gateway_id || "默认");
       const tagsHtml = (c.tags || []).map(t => `<span class="tag-badge">${escapeHtml(t)}</span>`).join("");
       const isProxyOn = Boolean(c.is_proxy_enabled);
-      const isLocal = ["127.0.0.1", "localhost", window.location.hostname].includes(c.host) && (c.port == 22 || !c.port) && !c.container_name;
+      const isLocal = c.access_mode !== "docker_host" && ["127.0.0.1", "localhost", window.location.hostname].includes(c.host) && (c.port == 22 || !c.port) && !c.container_name;
 
       let addrBadge = '<span class="addr-badge">SSH直连</span>';
       let addrRow = `<code>${escapeHtml(c.ssh_user || 'root')}@${escapeHtml(c.host)}:${c.port || 22}</code>`;
@@ -962,7 +838,7 @@ with ProxySession():
         addrRow = `<code>127.0.0.1 (本机执行)</code>`;
       } else if (c.access_mode === "docker_host" || (c.container_name && !c.port)) {
         addrBadge = '<span class="addr-badge" style="background:rgba(234,179,8,0.15);color:#facc15;">Docker穿透</span>';
-        addrRow = `<code>${escapeHtml(c.ssh_user || 'ubuntu')}@${escapeHtml(c.ssh_host || c.host)}</code> <span style="font-size:11px;color:var(--text-dim);">&rarr; [${escapeHtml(c.container_name || c.name)}]</span>`;
+        addrRow = `<code>${escapeHtml(c.ssh_user || 'ubuntu')}@${escapeHtml(c.ssh_host || c.host)}:${c.port || 22}</code> <span style="font-size:11px;color:var(--text-dim);">&rarr; [${escapeHtml(c.container_name || c.name)}]</span>`;
       } else if (c.port && c.port != 22) {
         addrBadge = `<span class="addr-badge" style="background:rgba(6,182,212,0.15);color:#22d3ee;">端口映射容器 (:${c.port})</span>`;
       }
@@ -995,23 +871,23 @@ with ProxySession():
             <span class="capsule-indicator">
               ${isProxyOn ? '<span class="pulse-dot"></span>已出海' : '⚪ 直连'}
             </span>
-            <button class="capsule-btn ${isProxyOn ? 'btn-turn-off' : 'btn-turn-on'}" data-action="toggle-client" data-id="${c.id}" data-action-type="${isProxyOn ? 'off' : 'on'}">
+            <button class="capsule-btn ${isProxyOn ? 'btn-turn-off' : 'btn-turn-on'}" data-action="toggle-client" data-id="${escapeHtml(c.id)}" data-action-type="${isProxyOn ? 'off' : 'on'}">
               ${isProxyOn ? '🛑 关闭' : '⚡ 开启'}
             </button>
           </div>
         </td>
         <td style="text-align: right;">
           <div class="table-actions-modern">
-            <button class="btn-speedtest" data-action="test-node-out" data-id="${c.id}" title="实测出海延迟与连通状态">
-              🔍 测外网 <span class="rtt-pill" id="rtt-${c.id}"></span>
+            <button class="btn-speedtest" data-action="test-node-out" data-id="${escapeHtml(c.id)}" title="实测出海延迟与连通状态">
+              🔍 测外网 <span class="rtt-pill" id="rtt-${escapeHtml(c.id)}"></span>
             </button>
             <div class="action-dropdown-wrap">
               <button class="btn-dropdown-toggle" title="更多运维操作">•••</button>
               <div class="action-dropdown-menu">
-                <button class="dropdown-item" data-action="edit-client" data-id="${c.id}">✏️ 编辑参数</button>
-                <button class="dropdown-item" data-action="clone-client" data-id="${c.id}">📋 克隆节点</button>
-                <button class="dropdown-item" data-action="test-client" data-id="${c.id}" data-host="${c.host}" data-port="${c.port || 22}">⚡ 连通探测</button>
-                <button class="dropdown-item danger" data-action="delete-client" data-id="${c.id}">🗑️ 删除节点</button>
+                <button class="dropdown-item" data-action="edit-client" data-id="${escapeHtml(c.id)}">✏️ 编辑参数</button>
+                <button class="dropdown-item" data-action="clone-client" data-id="${escapeHtml(c.id)}">📋 克隆节点</button>
+                <button class="dropdown-item" data-action="test-client" data-id="${escapeHtml(c.id)}" data-host="${escapeHtml(c.host)}" data-port="${c.port || 22}">⚡ 连通探测</button>
+                <button class="dropdown-item danger" data-action="delete-client" data-id="${escapeHtml(c.id)}">🗑️ 删除节点</button>
               </div>
             </div>
           </div>
@@ -1312,10 +1188,10 @@ with ProxySession():
         <td style="color:var(--text-muted); font-size:12px;">${escapeHtml(g.description || '-')}</td>
         <td>
           <div class="table-actions">
-            ${!isDefault ? `<button class="btn-mini" data-action="set-default-gw" data-id="${g.id}">设为默认</button>` : ''}
-            <button class="btn-mini" data-action="test-gw" data-host="${g.host}" data-port="${g.port}">⚡ 测通</button>
-            <button class="btn-mini" data-action="edit-gw" data-id="${g.id}">✏️ 编辑</button>
-            ${!isDefault ? `<button class="btn-mini btn-danger" data-action="delete-gw" data-id="${g.id}">🗑️ 删除</button>` : ''}
+            ${!isDefault ? `<button class="btn-mini" data-action="set-default-gw" data-id="${escapeHtml(g.id)}">设为默认</button>` : ''}
+            <button class="btn-mini" data-action="test-gw" data-host="${escapeHtml(g.host)}" data-port="${escapeHtml(g.port)}">⚡ 测通</button>
+            <button class="btn-mini" data-action="edit-gw" data-id="${escapeHtml(g.id)}">✏️ 编辑</button>
+            ${!isDefault ? `<button class="btn-mini btn-danger" data-action="delete-gw" data-id="${escapeHtml(g.id)}">🗑️ 删除</button>` : ''}
           </div>
         </td>
       `;
@@ -1350,7 +1226,7 @@ with ProxySession():
           if (d.online) {
             alert(`网关 ${host}:${port} 端口连通正常！延迟: ${d.latency_ms} ms`);
           } else {
-            alert(`网关 ${host}:${port} 端口不可达: ${d.error}`);
+            alert(`网关 ${host}:${port} 请求失败: ${d.error}`);
           }
         } catch (e) {
           alert("探测异常: " + e.message);
@@ -1490,8 +1366,9 @@ with ProxySession():
             if (sectionAccessSsh) sectionAccessSsh.style.display = "none";
             if (sectionAccessDockerHost) sectionAccessDockerHost.style.display = "block";
             if (formClientContainer) formClientContainer.value = target.container_name || "";
+            formClientHostPort.value = target.port || 22;
             if (formClientSshHost) formClientSshHost.value = target.ssh_host || target.host || "";
-            if (formClientSshUserHost) formClientSshUserHost.value = target.ssh_user || "zxy";
+            if (formClientSshUserHost) formClientSshUserHost.value = target.ssh_user || "ubuntu";
           } else {
             if (sectionAccessSsh) sectionAccessSsh.style.display = "block";
             if (sectionAccessDockerHost) sectionAccessDockerHost.style.display = "none";
@@ -1523,8 +1400,9 @@ with ProxySession():
       if (formClientSshPass) formClientSshPass.value = "";
       if (formClientSshUser) formClientSshUser.value = "root";
       if (formClientContainer) formClientContainer.value = "";
+      formClientHostPort.value = 22;
       if (formClientSshHost) formClientSshHost.value = "";
-      if (formClientSshUserHost) formClientSshUserHost.value = "zxy";
+      if (formClientSshUserHost) formClientSshUserHost.value = "ubuntu";
       formClientTags.value = "";
       formClientDesc.value = "";
     } else {
@@ -1546,8 +1424,9 @@ with ProxySession():
         if (sectionAccessSsh) sectionAccessSsh.style.display = "none";
         if (sectionAccessDockerHost) sectionAccessDockerHost.style.display = "block";
         if (formClientContainer) formClientContainer.value = target.container_name || "";
+        formClientHostPort.value = target.port || 22;
         if (formClientSshHost) formClientSshHost.value = target.ssh_host || target.host || "";
-        if (formClientSshUserHost) formClientSshUserHost.value = target.ssh_user || "zxy";
+        if (formClientSshUserHost) formClientSshUserHost.value = target.ssh_user || "ubuntu";
       } else {
         if (sectionAccessSsh) sectionAccessSsh.style.display = "block";
         if (sectionAccessDockerHost) sectionAccessDockerHost.style.display = "none";
@@ -1573,10 +1452,10 @@ with ProxySession():
   modalClientTestBtn.addEventListener("click", async () => {
     const accessMode = formClientAccessMode ? formClientAccessMode.value : "ssh";
     const host = formClientHost.value.trim();
-    const port = parseInt((formClientPort ? formClientPort.value.trim() : "22") || "22", 10);
+    const port = Number((accessMode === "docker_host" ? formClientHostPort.value : formClientPort.value) || 22);
     const osType = formClientOs ? formClientOs.value : "linux";
     const authType = formClientAuthType ? formClientAuthType.value : "key";
-    const sshUser = formClientSshUser ? formClientSshUser.value.trim() : "root";
+    const sshUser = (accessMode === "docker_host" ? formClientSshUserHost.value : formClientSshUser.value).trim();
     const sshPass = formClientSshPass ? formClientSshPass.value : "";
     const containerName = formClientContainer ? formClientContainer.value.trim() : "";
     const sshHost = formClientSshHost ? formClientSshHost.value.trim() : host;
@@ -1619,10 +1498,10 @@ with ProxySession():
       const d = await res.json();
       if (d.success) {
         formClientHint.style.color = "var(--success)";
-        formClientHint.textContent = d.message;
+        formClientHint.textContent = d.message || d.error;
       } else {
         formClientHint.style.color = d.tcp_ok ? "var(--warning)" : "var(--danger)";
-        formClientHint.textContent = d.message;
+        formClientHint.textContent = d.message || d.error;
       }
     } catch (e) {
       formClientHint.style.color = "var(--danger)";
@@ -1640,7 +1519,7 @@ with ProxySession():
     const name = formClientName.value.trim();
     const osType = formClientOs.value;
     const boundGw = formClientGw.value;
-    const tags = formClientTags.value.split(",").map(t => t.strip ? t.strip() : t.trim()).filter(Boolean);
+    const tags = formClientTags.value.split(",").map(t => t.trim()).filter(Boolean);
     const desc = formClientDesc.value.trim();
     const accessMode = formClientAccessMode ? formClientAccessMode.value : "ssh";
 
@@ -1656,7 +1535,8 @@ with ProxySession():
       host = formClientSshHost ? formClientSshHost.value.trim() : "";
       containerName = formClientContainer ? formClientContainer.value.trim() : "";
       sshHost = host;
-      sshUser = formClientSshUserHost ? formClientSshUserHost.value.trim() : "zxy";
+      port = Number(formClientHostPort.value || 22);
+      sshUser = formClientSshUserHost ? formClientSshUserHost.value.trim() : "ubuntu";
       authType = "key";
       if (!name || !host || !containerName) {
         formClientHint.style.color = "var(--danger)";

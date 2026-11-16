@@ -24,7 +24,7 @@
 
 ![控制台和 CLI 配置应用，应用经已有代理访问目标服务。SSH 或 Docker 可用于配置远程节点。](docs/assets/architecture.zh.svg)
 
-应用把请求直接发给所选代理，Web 控制台负责配置和诊断。首个请求可以在没有 SSH 节点的情况下完成。绑定远程节点时，需要填入该节点也能访问的网关地址。[查看 SVG 原图](docs/assets/architecture.zh.svg)
+浏览器通过本机地址或 SSH 隧道连接控制台。虚线表示控制台启动本机任务、通过 SSH 管理 Linux 账号或通过宿主机的 `docker exec` 配置指定容器。CLI 和 SDK 可以独立启动本机任务。实线从各应用汇入用户提供的 HTTP 代理，再到达目标服务。[查看 SVG 原图，适合手机放大](docs/assets/architecture.zh.svg)
 
 ![控制台首次使用界面，提供网关名称、地址、端口和代理请求测试](docs/assets/console.png)
 

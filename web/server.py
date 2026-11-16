@@ -212,6 +212,13 @@ def get_control_node_public_key():
     return None
 
 
+def ssh_with_script(command, script, timeout, env=None):
+    # Remote sh expects LF regardless of the Windows controller's code page.
+    result = subprocess.run(command, input=script.encode("utf-8"), capture_output=True, env=env, timeout=timeout)
+    return subprocess.CompletedProcess(command, result.returncode, result.stdout.decode("utf-8", "replace"),
+                                       result.stderr.decode("utf-8", "replace"))
+
+
 def run_remote_ssh_script(host, port, user, auth_type, password, script, timeout=14):
     """
     Executes a script on a remote workstation, edge board, or container via SSH.
@@ -242,7 +249,7 @@ def run_remote_ssh_script(host, port, user, auth_type, password, script, timeout
         env["DISPLAY"] = "dummy"
 
         try:
-            pubkey = get_control_node_public_key() if script != "true" else None
+            pubkey = get_control_node_public_key() if script.startswith("action=on\n") else None
             if pubkey:
                 pubkey = shlex.quote(pubkey)
                 enroll_cmd = (
@@ -262,16 +269,7 @@ def run_remote_ssh_script(host, port, user, auth_type, password, script, timeout
                 f"{user}@{host}",
                 "sh"
             ]
-            res = subprocess.run(
-                cmd,
-                input=full_script,
-                capture_output=True,
-                text=True,
-                errors="replace",
-                env=env,
-                timeout=timeout
-            )
-            return res
+            return ssh_with_script(cmd, full_script, timeout, env)
         finally:
             try:
                 os.remove(askpass_path)
@@ -287,15 +285,7 @@ def run_remote_ssh_script(host, port, user, auth_type, password, script, timeout
             f"{user}@{host}",
             "sh"
         ]
-        res = subprocess.run(
-            cmd,
-            input=script,
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=timeout
-        )
-        return res
+        return ssh_with_script(cmd, script, timeout)
 
 
 def generate_provisioning_script(proxy_url, no_proxy, action="on"):
@@ -303,7 +293,7 @@ def generate_provisioning_script(proxy_url, no_proxy, action="on"):
     if action not in ("on", "off"):
         raise ValueError("Invalid switch action")
     template = (WEB_DIR / "provision.sh").read_text(encoding="utf-8")
-    return "action={}\\nproxy={}\\nbypass={}\\n".format(
+    return "action={}\nproxy={}\nbypass={}\n".format(
         action, shlex.quote(proxy_url), shlex.quote(validate_bypass(no_proxy))) + template
 
 
@@ -313,6 +303,30 @@ def validate_ssh_destination(host, user, container=None):
         raise ValueError("无效的 SSH 用户名")
     if container is not None and not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", container):
         raise ValueError("无效的 Docker 容器名称")
+
+
+def docker_ssh_command(target, *command):
+    host = target.get("ssh_host") or target.get("host") or "127.0.0.1"
+    user = target.get("ssh_user") or "ubuntu"
+    name = target.get("container_name") or target.get("name") or ""
+    port = int(target.get("port") or 22)
+    validate_host_port(host, port)
+    validate_ssh_destination(host, user, name)
+    remote = ["docker", *command, name]
+    if command[0] == "exec":
+        remote.append("sh")
+    # OpenSSH passes the remote command to a shell, even when invoked with argv.
+    return ["ssh", "-p", str(port), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "ConnectTimeout=5", f"{user}@{host}", " ".join(map(shlex.quote, remote))]
+
+
+def validate_client(target):
+    validate_host_port(target["host"], target.get("port", 22))
+    if target.get("access_mode") == "docker_host":
+        validate_ssh_destination(target.get("ssh_host") or target["host"], target.get("ssh_user") or "ubuntu",
+                                 target.get("container_name") or "")
+    else:
+        validate_ssh_destination(target["host"], target.get("ssh_user") or "root")
 
 
 def apply_node_proxy(target, action, cfg):
@@ -326,28 +340,16 @@ def apply_node_proxy(target, action, cfg):
     os_type = (target.get("os_type") or "linux").lower()
     access_mode = (target.get("access_mode") or ("docker_host" if target.get("container_name") and not target.get("port") else "ssh")).lower()
     gw = resolve_gateway_info(cfg, target.get("bound_gateway_id"))
-    proxy_url = gateway_url(gw)
+    proxy_url = gateway_url(gw) if action == "on" else ""
     no_proxy = cfg.get("no_proxy", "localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,*.local")
 
     result = {"action": action, "node_id": target.get("id"), "os_type": os_type, "access_mode": access_mode}
 
     # 1. 宿主机 Docker 穿透通道 (Legacy / Specific for containers without SSH)
     if access_mode == "docker_host":
-        cname = target.get("container_name") or target.get("name") or "app-container"
-        ssh_host = target.get("ssh_host") or target.get("host") or "127.0.0.1"
-        ssh_user = target.get("ssh_user") or "ubuntu"
-        validate_ssh_destination(ssh_host, ssh_user, cname)
         script = generate_provisioning_script(proxy_url, no_proxy, action)
         try:
-            res = subprocess.run(
-                ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=5",
-                 f"{ssh_user}@{ssh_host}", "docker", "exec", "-i", "-u", "0", cname, "sh"],
-                input=script,
-                capture_output=True,
-                text=True,
-                errors="replace",
-                timeout=12
-            )
+            res = ssh_with_script(docker_ssh_command(target, "exec", "-i", "-u", "0"), script, 12)
             result["returncode"] = res.returncode
             if res.returncode != 0:
                 result["stderr"] = res.stderr.strip()
@@ -384,7 +386,7 @@ def apply_node_proxy(target, action, cfg):
             result["stderr"] = res.stderr.strip()
         else:
             # If initial connection with password succeeded, upgrade node to key auth
-            if password and auth_type == "password" and get_control_node_public_key():
+            if action == "on" and password and auth_type == "password" and get_control_node_public_key():
                 probe = run_remote_ssh_script(host, port, user, "key", None, "true", timeout=8)
                 if probe.returncode != 0:
                     return result
@@ -394,6 +396,35 @@ def apply_node_proxy(target, action, cfg):
     except Exception as e:
         result["error"] = str(e)
 
+    return result
+
+
+def check_node_http(target):
+    mode = target.get("access_mode") or ("docker_host" if target.get("container_name") and not target.get("port") else "ssh")
+    started = time.monotonic()
+    result = {"online": False, "latency_ms": None, "is_proxy_enabled": bool(target.get("is_proxy_enabled"))}
+    try:
+        local = (mode != "docker_host" and is_local_host(target.get("host"))
+                 and int(target.get("port") or 22) == 22 and not target.get("container_name"))
+        # Use only the final status, not CONNECT headers or numbers in an HTTP body.
+        command = ["curl", "-sS", "-o", os.devnull if local else "/dev/null", "-w", "%{http_code}",
+                   "--max-time", "8", "https://www.google.com"]
+        if local:
+            res = subprocess.run(command, capture_output=True, text=True, errors="replace", timeout=10)
+        else:
+            script = " ".join(map(shlex.quote, command))
+            if mode == "docker_host":
+                res = ssh_with_script(docker_ssh_command(target, "exec", "-i"), script, 14)
+            else:
+                user = target.get("ssh_user") or ("root" if target.get("os_type") == "docker" else "ubuntu")
+                res = run_remote_ssh_script(target["host"], target.get("port"), user,
+                                            target.get("auth_type"), target.get("ssh_pass"), script, timeout=14)
+        code = res.stdout.strip()
+        result["online"] = res.returncode == 0 and bool(re.fullmatch(r"2[0-9]{2}", code))
+        result["status_line"] = ("HTTP " + code) if res.returncode == 0 else (res.stderr.strip() or "请求失败")
+        result["latency_ms"] = round((time.monotonic() - started) * 1000, 1)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        result.update(error=str(exc), status_line=str(exc))
     return result
 
 
@@ -733,17 +764,18 @@ echo "=================================================="
         ssh_host = req_json.get("ssh_host", "").strip() or host
 
         if access_mode == "docker_host":
+            validate_host_port(ssh_host, port)
             validate_ssh_destination(ssh_host, user, container_name)
-            ok, rtt_or_err = check_tcp_port(ssh_host, 22, timeout=2.5)
+            ok, rtt_or_err = check_tcp_port(ssh_host, port, timeout=2.5)
             if not ok:
                 self.send_json({
                     "success": False,
                     "tcp_ok": False,
-                    "message": f"❌ 宿主机网络不可达 ({ssh_host}:22): {rtt_or_err}"
+                    "message": f"❌ 宿主机网络不可达 ({ssh_host}:{port}): {rtt_or_err}"
                 })
                 return
             try:
-                cmd = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=4", f"{user}@{ssh_host}", f"docker inspect -f '{{{{.State.Running}}}}' {container_name}"]
+                cmd = docker_ssh_command(dict(req_json, ssh_host=ssh_host, ssh_user=user), "inspect", "-f", "{{.State.Running}}")
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=6)
                 if res.returncode == 0 and "true" in res.stdout.lower():
                     self.send_json({
@@ -771,11 +803,10 @@ echo "=================================================="
 
         # 1. TCP Connect
         t0 = time.time()
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(3.0)
+        validate_host_port(host, port)
+        validate_ssh_destination(host, user)
         try:
-            sock.connect((host, port))
-            tcp_ok = True
+            sock = socket.create_connection((host, port), timeout=3.0)
             rtt_ms = round((time.time() - t0) * 1000, 1)
         except Exception as e:
             self.send_json({
@@ -887,6 +918,7 @@ echo "=================================================="
         if "ssh_host" in req_json:
             new_client["ssh_host"] = req_json["ssh_host"].strip()
 
+        validate_client(new_client)
         clients.append(new_client)
         cfg["clients"] = clients
         save_config(cfg)
@@ -929,6 +961,7 @@ echo "=================================================="
             target["tags"] = t if isinstance(t, list) else [x.strip() for x in str(t).split(",") if x.strip()]
         if "description" in req_json: target["description"] = req_json["description"].strip()
 
+        validate_client(target)
         save_config(cfg)
         write_audit_log("client_update", cid, "success", f"更新节点: {target['name']}")
         self.send_json({"success": True, "message": "业务节点更新成功", "client": target})
@@ -998,7 +1031,7 @@ echo "=================================================="
             "action": action,
             "node_id": node_id,
             "is_proxy_enabled": target["is_proxy_enabled"],
-            "gateway": f"{gw['host']}:{gw['port']}",
+            "gateway": f"{gw['host']}:{gw['port']}" if gw else None,
             "dispatch_result": dispatch_result,
             "message": msg
         })
@@ -1068,48 +1101,7 @@ echo "=================================================="
         health_map = {}
 
         def check_one(target):
-            cid = target.get("id")
-            t0 = time.time()
-            test_cmd = "curl -I --connect-timeout 6 https://www.google.com | head -n 2"
-            os_type = (target.get("os_type") or "linux").lower()
-            access_mode = (target.get("access_mode") or ("docker_host" if target.get("container_name") and not target.get("port") else "ssh")).lower()
-
-            try:
-                if access_mode == "docker_host":
-                    cname = target.get("container_name") or target.get("name") or "app-container"
-                    ssh_host = target.get("ssh_host") or target.get("host") or "127.0.0.1"
-                    ssh_user = target.get("ssh_user") or "ubuntu"
-                    validate_ssh_destination(ssh_host, ssh_user, cname)
-                    res = subprocess.run(
-                        ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=4", f"{ssh_user}@{ssh_host}", "docker", "exec", "-i", cname, "sh"],
-                        input=test_cmd, capture_output=True, text=True, errors="replace", timeout=10
-                    )
-                elif is_local_host(target.get("host")) and int(target.get("port") or 22) == 22 and not target.get("container_name"):
-                    res = subprocess.run(["curl", "-I", "--connect-timeout", "6", "https://www.google.com"], capture_output=True, text=True, errors="replace", timeout=10)
-                else:
-                    host = target.get("host")
-                    port = int(target.get("port") or 22)
-                    user = target.get("ssh_user") or ("root" if os_type == "docker" else "ubuntu")
-                    auth_type = target.get("auth_type") or ("password" if target.get("ssh_pass") else "key")
-                    password = target.get("ssh_pass")
-                    res = run_remote_ssh_script(host, port, user, auth_type, password, test_cmd, timeout=10)
-
-                rtt = round((time.time() - t0) * 1000, 1)
-                is_online = (res.returncode == 0 and any(code in res.stdout for code in ("200", "301", "302")))
-                status_line = res.stdout.strip().split("\n")[0] if res.stdout.strip() else ("HTTP 200 OK" if is_online else "直连超时或未通外网")
-                return cid, {
-                    "online": is_online,
-                    "latency_ms": rtt if is_online else None,
-                    "status_line": status_line,
-                    "is_proxy_enabled": target.get("is_proxy_enabled", False)
-                }
-            except Exception as e:
-                return cid, {
-                    "online": False,
-                    "latency_ms": None,
-                    "status_line": str(e),
-                    "is_proxy_enabled": target.get("is_proxy_enabled", False)
-                }
+            return target.get("id"), check_node_http(target)
 
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_results = list(executor.map(check_one, clients))
@@ -1139,86 +1131,9 @@ echo "=================================================="
             self.send_json({"success": False, "error": f"未找到ID为 '{node_id}' 的节点"}, status_code=404)
             return
 
-        os_type = (target.get("os_type") or "linux").lower()
-        access_mode = (target.get("access_mode") or ("docker_host" if target.get("container_name") and not target.get("port") else "ssh")).lower()
-        t0 = time.time()
-        test_cmd = "curl -I --connect-timeout 8 https://www.google.com | head -n 2"
-
-        # 1. 宿主机 Docker 穿透模式 (Legacy)
-        if access_mode == "docker_host":
-            cname = target.get("container_name") or target.get("name") or "app-container"
-            ssh_host = target.get("ssh_host") or target.get("host") or "127.0.0.1"
-            ssh_user = target.get("ssh_user") or "ubuntu"
-            validate_ssh_destination(ssh_host, ssh_user, cname)
-            try:
-                res = subprocess.run(
-                    ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=5",
-                     f"{ssh_user}@{ssh_host}", "docker", "exec", "-i", cname, "sh"],
-                    input=test_cmd,
-                    capture_output=True,
-                    text=True,
-                    errors="replace",
-                    timeout=14
-                )
-                rtt_ms = round((time.time() - t0) * 1000, 1)
-                is_online = (res.returncode == 0 and any(code in res.stdout for code in ("200", "301", "302")))
-                status_line = res.stdout.strip().split("\n")[0] if res.stdout.strip() else ("HTTP 200 OK" if is_online else "直连超时或未通外网")
-                self.send_json({
-                    "success": True,
-                    "node_id": node_id,
-                    "online": is_online,
-                    "latency_ms": rtt_ms if is_online else None,
-                    "status_line": status_line,
-                    "is_proxy_enabled": target.get("is_proxy_enabled", False),
-                    "message": "容器出海访问正常" if is_online else "容器处于直连状态或外网未连通"
-                })
-            except Exception as e:
-                self.send_json({"success": False, "node_id": node_id, "online": False, "error": str(e), "message": f"远程容器检测异常: {e}"})
-            return
-
-        # 2. 本地 Linux 节点 (动态检测当前服务器本机)
-        if is_local_host(target.get("host")) and int(target.get("port") or 22) == 22 and not target.get("container_name"):
-            try:
-                res = subprocess.run(["curl", "-I", "--connect-timeout", "8", "https://www.google.com"], capture_output=True, text=True, errors="replace", timeout=14)
-                rtt_ms = round((time.time() - t0) * 1000, 1)
-                is_online = (res.returncode == 0 and any(code in res.stdout for code in ("200", "301", "302")))
-                status_line = res.stdout.strip().split("\n")[0] if res.stdout.strip() else ("HTTP 200 OK" if is_online else "直连超时或未通外网")
-                self.send_json({
-                    "success": True,
-                    "node_id": node_id,
-                    "online": is_online,
-                    "latency_ms": rtt_ms if is_online else None,
-                    "status_line": status_line,
-                    "is_proxy_enabled": target.get("is_proxy_enabled", False),
-                    "message": "本地计算节点出海访问正常" if is_online else "本地计算节点未通外网 (处于直连模式)"
-                })
-            except Exception as e:
-                self.send_json({"success": False, "node_id": node_id, "online": False, "error": str(e), "message": f"节点连通性检测异常: {e}"})
-            return
-
-        # 3. 通用远程 SSH 直连通道 (物理工作站 / 工控机 / 边缘设备 / 暴露端口容器)
-        host = target.get("host")
-        port = int(target.get("port") or 22)
-        user = target.get("ssh_user") or ("root" if os_type == "docker" else "ubuntu")
-        auth_type = target.get("auth_type") or ("password" if target.get("ssh_pass") else "key")
-        password = target.get("ssh_pass")
-        try:
-            res = run_remote_ssh_script(host, port, user, auth_type, password, test_cmd, timeout=14)
-            rtt_ms = round((time.time() - t0) * 1000, 1)
-            is_online = (res.returncode == 0 and any(code in res.stdout for code in ("200", "301", "302")))
-            status_line = res.stdout.strip().split("\n")[0] if res.stdout.strip() else ("HTTP 200 OK" if is_online else "直连超时或未通外网")
-            self.send_json({
-                "success": True,
-                "node_id": node_id,
-                "online": is_online,
-                "latency_ms": rtt_ms if is_online else None,
-                "status_line": status_line,
-                "is_proxy_enabled": target.get("is_proxy_enabled", False),
-                "message": f"节点【{target['name']}】出海访问正常" if is_online else f"节点【{target['name']}】处于直连状态或外网未连通"
-            })
-        except Exception as e:
-            self.send_json({"success": False, "node_id": node_id, "online": False, "error": str(e), "message": f"远程节点检测异常: {e}"})
-        return
+        result = check_node_http(target)
+        self.send_json(dict(result, success="error" not in result, node_id=node_id,
+                            message=result["status_line"]))
 
     def handle_gateway_add(self):
         req_json = self.read_json_body()
@@ -1408,7 +1323,7 @@ def main():
     try:
         run_server(args.port if args.port is not None else args.legacy_port, args.bind)
     except (OSError, ValueError) as exc:
-        parser.exit(1, f"net-proxy-tool: {exc}\\n")
+        parser.exit(1, f"net-proxy-tool: {exc}\n")
 
 
 if __name__ == "__main__":

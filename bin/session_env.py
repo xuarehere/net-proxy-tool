@@ -13,6 +13,11 @@ def main():
     values = proxy_environment(cfg, *resolve_gateway(cfg))
     if sys.argv[1:] == ["--json"]:
         print(json.dumps(values, ensure_ascii=True))
+    elif sys.argv[1:] == ["--environment-file"]:
+        for key, value in values.items():
+            if any(char in value for char in ('"', '\\', '\n', '\r')):
+                raise ValueError("Proxy value cannot be represented in /etc/environment")
+            print(f'{key}="{value}" # net-proxy-tool')
     else:
         for key, value in values.items():
             print(f"export {key}={shlex.quote(value)}")

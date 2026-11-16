@@ -31,7 +31,7 @@ class IsolatedTest(unittest.TestCase):
 
 class CommandTests(IsolatedTest):
     def test_empty_and_legacy_config(self):
-        self.assertEqual(config_path(), self.path)
+        self.assertEqual(config_path(), self.path.resolve())
         self.assertEqual(load_config()["clients"], [])
         self.assertFalse(self.path.exists())
         self.path.write_text('{"proxy_host":"127.0.0.1","proxy_port":17777}', encoding="utf-8")
@@ -113,7 +113,9 @@ class LauncherTests(IsolatedTest):
             port = str(reservation.getsockname()[1])
         self.addCleanup(self.launch, "--stop")
         first = self.launch(port, "--no-browser")
-        self.assertEqual(first.returncode, 0, first.stderr)
+        if first.returncode:
+            log = self.path.parent / "data/console.log"
+            self.fail(first.stderr + (log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""))
         state_file = self.path.parent / "data/instance.json"
         original = json.loads(state_file.read_text())
         self.assertEqual(self.launch(port, "--no-browser").returncode, 0)

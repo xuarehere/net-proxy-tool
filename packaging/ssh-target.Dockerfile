@@ -1,5 +1,5 @@
 # Disposable SSH target used only by packaging/test_compose.py.
-FROM alpine:3.23
+FROM python:3.12-alpine
 RUN apk add --no-cache openssh-server git \
     && adduser -D tester && passwd -d tester \
     && mkdir -p /run/sshd /home/tester/.ssh \

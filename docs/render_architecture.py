@@ -1,84 +1,127 @@
-"""Regenerate the Chinese and English diagrams with Python's standard library."""
+"""Regenerate the two SVGs with the Python standard library."""
 
 from pathlib import Path
 from xml.sax.saxutils import escape
 
 ASSETS = Path(__file__).resolve().parent / "assets"
 LABELS = {
-    "zh": (
-        "代理控制与请求路径", "本地管理", "浏览器", "Web 控制台", "选择网关、测试连通性",
-        "应用配置", "CLI / Python SDK", "为应用设置代理环境变量", "SSH / Docker", "配置指定节点或容器",
-        "网络请求", "应用进程", "已有代理", "目标服务",
-        "实线箭头表示请求经过的路径。虚线表示控制台或命令行配置应用的路径。",
-    ),
-    "en": (
-        "Proxy control and request paths", "Local control", "Browser", "Web console", "Select and test a gateway",
-        "Configuration", "CLI / Python SDK", "Set proxy variables for an app", "SSH / Docker", "Configure a node or container",
-        "Traffic", "Application", "Existing proxy", "Destination",
-        "Solid arrows show network traffic. Dashed arrows show how the console or CLI configures applications.",
-    ),
+    "zh": {
+        "title": "控制台如何配置节点，应用如何发出请求",
+        "desc": "虚线为管理路径。CLI 或 SDK 也能独立配置本机任务。实线为应用通过已有 HTTP 代理访问目标服务的路径。",
+        "control": "配置与管理", "traffic": "应用请求",
+        "entry": "入口", "work": "执行任务的位置", "egress": "网络出口",
+        "cli": "CLI / Python SDK", "optional": "可独立使用", "browser": "浏览器",
+        "access": "本机访问或 SSH 隧道", "console": "Web 控制台", "config": "网关配置、诊断与节点管理",
+        "run": "启动任务", "local": "本机任务", "child": "本机应用 / 子进程",
+        "linux": "Linux 节点", "ssh": "SSH 直连目标账号", "process": "该账号运行的应用进程",
+        "host": "Docker 宿主机", "docker": "目标容器", "inside": "容器内的应用进程",
+        "gateway": "HTTP 代理网关", "own": "由用户提供", "service": "目标服务", "target": "HTTP / HTTPS",
+    },
+    "en": {
+        "title": "How applications reach their destination",
+        "desc": "Dashed lines show configuration paths. The CLI or SDK can configure a local task independently. Solid lines trace requests from apps through an existing HTTP proxy.",
+        "control": "Configuration", "traffic": "Application traffic",
+        "entry": "Entry points", "work": "Where tasks run", "egress": "Network",
+        "cli": "CLI / Python SDK", "optional": "Optional standalone entry", "browser": "Browser",
+        "access": "Local URL or SSH tunnel", "console": "Web console", "config": "Gateways and diagnostics",
+        "run": "Run task", "local": "Local task", "child": "Local app / child process",
+        "linux": "Linux node", "ssh": "SSH to the target account", "process": "App running as that user",
+        "host": "Docker host", "docker": "Target container", "inside": "App in the container",
+        "gateway": "HTTP proxy", "own": "Provided by the user", "service": "Destination", "target": "HTTP / HTTPS",
+    },
 }
 
 
-def diagram(lang, strings):
-    (title, control, browser, console, configure, settings, runner, runner_detail,
-     remote, remote_detail, traffic, app, proxy, target, description) = map(escape, strings)
+def diagram(lang, labels):
+    svg = []
 
-    def label(x, y, value, style, align="start"):
-        return f'<text x="{x}" y="{y}" class="{style}" text-anchor="{align}">{value}</text>'
+    def rect(x, y, w, h, fill, stroke="none"):
+        svg.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="12" fill="{fill}" stroke="{stroke}"/>')
 
-    def box(x, y, width, height, color):
-        return f'<rect x="{x}" y="{y}" width="{width}" height="{height}" rx="14" fill="{color}"/>'
+    def label(x, y, key, style):
+        value = escape(labels.get(key, key))
+        svg.append(f'<text x="{x}" y="{y}" class="{style}">{value}</text>')
 
-    def arrow(path, kind):
-        return f'<path d="{path}" class="{kind}" marker-end="url(#{kind})"/>'
+    def path(d, style, end=False):
+        marker = f' marker-end="url(#{style}-end)"' if end else ""
+        svg.append(f'<path d="{d}" class="{style}"{marker}/>')
 
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" lang="{lang}" viewBox="0 0 720 476" role="img" aria-labelledby="title description">
-  <title id="title">{title}</title><desc id="description">{description}</desc>
-  <defs>
-    <marker id="control" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="#496568"/></marker>
-    <marker id="traffic" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="#17645b"/></marker>
-  </defs>
-  <style>
-    text {{font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;fill:#163d40}}
-    .title {{font-size:32px;font-weight:700}} .section {{font-size:17px;font-weight:650;fill:#476566}}
-    .node {{font-size:22px;font-weight:650}} .detail {{font-size:16px;fill:#39595c}}
-    .highlight {{font-size:22px;font-weight:700;fill:#fff}}
-    .control,.traffic {{fill:none;stroke-width:2.4}} .control {{stroke:#496568;stroke-dasharray:5 4}} .traffic {{stroke:#17645b}}
-  </style>
-  <rect width="720" height="476" rx="20" fill="#f8faf7"/>
-  {label(32, 53, title, "title")}
-  {label(32, 94, control, "section")}
-  {box(32, 109, 246, 67, "#e6eeeb")}
-  {label(155, 150, browser, "node", "middle")}
-  {arrow("M284 142H337", "control")}
-  {box(348, 109, 340, 67, "#d7eae7")}
-  {label(518, 138, console, "node", "middle")}
-  {label(518, 160, configure, "detail", "middle")}
-  <path d="M518 178V205H189" class="control"/>
-  {arrow("M189 204V234", "control")}
-  {arrow("M518 204V234", "control")}
-  {label(32, 222, settings, "section")}
-  {box(32, 241, 313, 76, "#e6eeeb")}
-  {box(364, 241, 324, 76, "#e6eeeb")}
-  {label(188, 273, runner, "node", "middle")}
-  {label(188, 298, runner_detail, "detail", "middle")}
-  {label(526, 273, remote, "node", "middle")}
-  {label(526, 298, remote_detail, "detail", "middle")}
-  <path d="M526 319V342H116" class="control"/>
-  <path d="M188 319V342" class="control"/>
-  {arrow("M116 342V379", "control")}
-  {label(32, 364, traffic, "section")}
-  {box(32, 390, 170, 56, "#d7eae7")}
-  {box(264, 390, 190, 56, "#17645b")}
-  {box(516, 390, 172, 56, "#d7eae7")}
-  {label(117, 426, app, "node", "middle")}
-  {label(359, 426, proxy, "highlight", "middle")}
-  {label(602, 426, target, "node", "middle")}
-  {arrow("M209 418H251", "traffic")}
-  {arrow("M461 418H503", "traffic")}
-</svg>
-'''
+    svg.append(f'''<svg xmlns="http://www.w3.org/2000/svg" lang="{lang}" viewBox="0 0 1112 650" role="img" aria-labelledby="title desc">
+<title id="title">{escape(labels["title"])}</title><desc id="desc">{escape(labels["desc"])}</desc>
+<defs>
+  <marker id="ctrl-end" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="#566883"/></marker>
+  <marker id="flow-end" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="#137568"/></marker>
+</defs>
+<style>
+  text {{font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;fill:#163d40}}
+  .title {{font-size:34px;font-weight:700}} .section {{font-size:20px;font-weight:650;fill:#446361}}
+  .node {{font-size:25px;font-weight:660}} .detail {{font-size:17px;fill:#40585b}}
+  .route {{font-size:16px;font-weight:600;fill:#455971}} .light {{font-size:25px;font-weight:700;fill:white}}
+  .subtle {{font-size:18px;fill:#dcf3ed}} .legend {{font-size:18px;fill:#3d565c}}
+  .ctrl,.flow {{fill:none;stroke-linejoin:round;stroke-linecap:round;stroke-width:2.6}}
+  .ctrl {{stroke:#566883;stroke-dasharray:5 5}} .flow {{stroke:#137568;stroke-width:3}}
+</style>''')
+    rect(0, 0, 1112, 650, "#f8faf7")
+    label(32, 57, "title", "title")
+    path("M33 95h44", "ctrl", True)
+    label(91, 101, "control", "legend")
+    path("M262 95h44", "flow", True)
+    label(320, 101, "traffic", "legend")
+    svg.append('<path d="M32 128h1048" stroke="#cfddda"/>')
+    for x, key in ((32, "entry"), (408, "work"), (857, "egress")):
+        label(x, 168, key, "section")
+
+    # Control host. The CLI has a direct path independent of the browser/console.
+    rect(32, 193, 263, 86, "#e8eaf1")
+    label(50, 228, "cli", "node")
+    label(50, 255, "optional", "detail")
+    path("M297 222H397", "ctrl", True)
+    rect(32, 315, 263, 80, "#e8eaf1")
+    label(50, 349, "browser", "node")
+    label(50, 376, "access", "detail")
+    path("M160 398v40", "ctrl", True)
+    rect(32, 449, 263, 93, "#e8eaf1")
+    label(50, 488, "console", "node")
+    label(50, 517, "config", "detail")
+
+    # The console controls a task, an SSH account or a Docker host over SSH.
+    path("M297 493H316V260H397", "ctrl", True)
+    label(328, 252, "run", "route")
+    path("M316 359H397", "ctrl", True)
+    label(338, 349, "SSH", "route")
+    path("M316 493H397", "ctrl", True)
+    label(338, 483, "SSH", "route")
+    rect(408, 193, 329, 86, "#e1eeea")
+    label(428, 228, "local", "node")
+    label(428, 255, "child", "detail")
+    rect(408, 309, 329, 108, "#e1eeea")
+    label(428, 344, "linux", "node")
+    label(428, 372, "ssh", "detail")
+    label(428, 397, "process", "detail")
+
+    # Nested box denotes a container inside the remote Docker host.
+    rect(408, 448, 329, 173, "#eef4ef", "#96aea6")
+    label(428, 483, "host", "node")
+    path("M442 494v24", "ctrl", True)
+    label(462, 512, "docker exec", "route")
+    rect(427, 526, 291, 78, "#d9e9e2")
+    label(445, 558, "docker", "node")
+    label(445, 585, "inside", "detail")
+
+    # Only application traffic leaves for the HTTP proxy.
+    path("M739 235H794V561H720", "flow")
+    path("M739 361H846", "flow", True)
+    svg.append('<circle cx="794" cy="361" r="4.5" fill="#137568"/>')
+    rect(857, 312, 223, 97, "#146258")
+    label(877, 354, "gateway", "light")
+    label(877, 383, "own", "subtle")
+    path("M966 412v74", "flow", True)
+    rect(857, 498, 223, 95, "#d9eae4")
+    label(877, 538, "service", "node")
+    label(877, 566, "target", "detail")
+
+    svg.append("</svg>")
+    return "\n".join(svg) + "\n"
 
 
 if __name__ == "__main__":

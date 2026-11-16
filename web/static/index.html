@@ -534,7 +534,7 @@ pip install requests openai</code></pre>
           <!-- Linux Bash -->
           <div class="code-card">
             <div class="code-card-header">
-              <span class="os-pill linux">Linux 业务节点 (Bash, 186 / ARM64 / Ubuntu)</span>
+              <span class="os-pill linux">Linux 业务节点 (Bash / ARM64 / Ubuntu)</span>
               <button class="btn-copy" data-target="hb-code-linux">复制代码</button>
             </div>
             <pre id="hb-code-linux"><code># 1. 单任务沙箱包装 (最推荐：命令结束代理立即销毁，环境保持纯净)
@@ -746,6 +746,10 @@ docker run --rm \
             <div class="form-group half">
               <label>宿主机 IP 地址 *:</label>
               <input type="text" id="form-client-ssh-host" class="form-input" placeholder="例如: 192.168.1.102">
+            </div>
+            <div class="form-group half">
+              <label for="form-client-host-port">宿主机 SSH 端口</label>
+              <input type="number" id="form-client-host-port" class="form-input" value="22" min="1" max="65535">
             </div>
             <div class="form-group half">
               <label>宿主机免密用户名 *:</label>

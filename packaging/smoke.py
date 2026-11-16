@@ -80,7 +80,14 @@ def run(root, browser=False):
             port = sock.getsockname()[1]
 
         def launch(*args):
-            subprocess.run(command + list(args), cwd=tmp, env=env, check=True, timeout=30)
+            try:
+                subprocess.run(command + list(args), cwd=tmp, env=env, stdin=subprocess.DEVNULL,
+                               check=True, timeout=30)
+            except subprocess.SubprocessError:
+                log = config.parent / "data/console.log"
+                if log.is_file():
+                    print("\n".join(log.read_text(encoding="utf-8", errors="replace").splitlines()[-15:]))
+                raise
 
         with ThreadingHTTPServer(("127.0.0.1", 0), RecordingProxy) as proxy:
             proxy.seen = []
@@ -88,8 +95,8 @@ def run(root, browser=False):
             thread.start()
             gateway = {"name": "Portable smoke", "host": "127.0.0.1", "port": proxy.server_port,
                        "protocol": "http"}
-            launch(str(port), "--no-browser")
             try:
+                launch(str(port), "--no-browser")
                 assert api(port, "/api/health")["service"] == "net-proxy-tool"
                 assert not api(port, "/api/config")["gateways"]
                 if browser:
@@ -108,9 +115,12 @@ def run(root, browser=False):
                 launch(str(port), "--no-browser")
                 assert api(port, "/api/config")["gateways"][0]["port"] == gateway["port"]
             finally:
-                launch("--stop")
-                proxy.shutdown()
-                thread.join()
+                try:
+                    if (config.parent / "data/instance.json").is_file():
+                        launch("--stop")
+                finally:
+                    proxy.shutdown()
+                    thread.join()
         legacy = {"proxy_host": "127.0.0.1", "proxy_port": 7812}
         config.write_text(json.dumps(legacy), encoding="utf-8")
         launch(str(port), "--no-browser")

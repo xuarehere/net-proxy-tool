@@ -2,11 +2,14 @@
 set -eu
 umask 077
 state="$HOME/.local/state/net-proxy-tool"
+if [ ! -e "$state/env/applied" ] && {
+    grep -qs '^export HTTP_PROXY=' "$HOME/.net-proxy-switch.sh" ||
+    grep -qs '^# --- NET-PROXY-TOOL-START ---$' "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile" /etc/bash.bashrc /etc/profile;
+}; then
+    echo "Legacy v1.3 proxy settings have no original snapshots. Review the affected account's curl, wget, pip, git and shell settings (and /etc if previously managed), restore from your backups, then retry." >&2
+    exit 1
+fi
 if [ "$action" = off ] && [ ! -d "$state" ]; then
-    if [ -e "$HOME/.net-proxy-switch.sh" ]; then
-        echo "Legacy proxy settings have no backup. Review the v1.3 settings on this node before removing them." >&2
-        exit 1
-    fi
     exit 0
 fi
 mkdir -p "$state"
@@ -24,6 +27,7 @@ manage() {
     if [ -e "$dir/applied" ] && ! cmp -s "$file" "$dir/applied"; then
         echo "Edited since activation: $file. Original snapshot: $dir" >&2; exit 1
     fi
+    if [ "$stage" = check ]; then return; fi
     if [ "$action" = off ]; then
         if [ -f "$dir/original" ]; then cp -p "$dir/original" "$file"; else rm -f "$file"; fi
         rm -f "$dir/original" "$dir/applied" "$dir/absent" "$dir/next"
@@ -61,17 +65,19 @@ manage() {
     mv "$next" "$dir/applied"
 }
 
-manage curlrc "$HOME/.curlrc" curl
-manage wgetrc "$HOME/.wgetrc" wget
-manage pip "$HOME/.config/pip/pip.conf" pip
-if command -v git >/dev/null 2>&1; then manage git "$HOME/.gitconfig" git; fi
-manage env "$HOME/.net-proxy-switch.sh" env
-for name in .bashrc .profile .bash_profile; do
-    if [ -f "$HOME/$name" ] || [ -d "$state/$name" ]; then manage "$name" "$HOME/$name" profile; fi
+for stage in check apply; do
+    manage curlrc "$HOME/.curlrc" curl
+    manage wgetrc "$HOME/.wgetrc" wget
+    manage pip "$HOME/.config/pip/pip.conf" pip
+    if command -v git >/dev/null 2>&1 || [ "$action" = off ]; then manage git "$HOME/.gitconfig" git; fi
+    manage env "$HOME/.net-proxy-switch.sh" env
+    for name in .bashrc .profile .bash_profile; do
+        if [ -f "$HOME/$name" ] || [ -d "$state/$name" ]; then manage "$name" "$HOME/$name" profile; fi
+    done
+    if [ "$(id -u)" = 0 ]; then
+        manage system-curl /etc/curlrc curl
+        manage system-pip /etc/pip.conf pip
+        if command -v git >/dev/null 2>&1 || [ "$action" = off ]; then manage system-git /etc/gitconfig git; fi
+        if [ -d /etc/apt/apt.conf.d ]; then manage apt /etc/apt/apt.conf.d/99net-proxy apt; fi
+    fi
 done
-if [ "$(id -u)" = 0 ]; then
-    manage system-curl /etc/curlrc curl
-    manage system-pip /etc/pip.conf pip
-    if command -v git >/dev/null 2>&1; then manage system-git /etc/gitconfig git; fi
-    if [ -d /etc/apt/apt.conf.d ]; then manage apt /etc/apt/apt.conf.d/99net-proxy apt; fi
-fi

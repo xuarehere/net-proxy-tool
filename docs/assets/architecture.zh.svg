@@ -1,45 +1,67 @@
-<svg xmlns="http://www.w3.org/2000/svg" lang="zh" viewBox="0 0 720 476" role="img" aria-labelledby="title description">
-  <title id="title">代理控制与请求路径</title><desc id="description">实线箭头表示请求经过的路径。虚线表示控制台或命令行配置应用的路径。</desc>
-  <defs>
-    <marker id="control" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="#496568"/></marker>
-    <marker id="traffic" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="#17645b"/></marker>
-  </defs>
-  <style>
-    text {font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;fill:#163d40}
-    .title {font-size:32px;font-weight:700} .section {font-size:17px;font-weight:650;fill:#476566}
-    .node {font-size:22px;font-weight:650} .detail {font-size:16px;fill:#39595c}
-    .highlight {font-size:22px;font-weight:700;fill:#fff}
-    .control,.traffic {fill:none;stroke-width:2.4} .control {stroke:#496568;stroke-dasharray:5 4} .traffic {stroke:#17645b}
-  </style>
-  <rect width="720" height="476" rx="20" fill="#f8faf7"/>
-  <text x="32" y="53" class="title" text-anchor="start">代理控制与请求路径</text>
-  <text x="32" y="94" class="section" text-anchor="start">本地管理</text>
-  <rect x="32" y="109" width="246" height="67" rx="14" fill="#e6eeeb"/>
-  <text x="155" y="150" class="node" text-anchor="middle">浏览器</text>
-  <path d="M284 142H337" class="control" marker-end="url(#control)"/>
-  <rect x="348" y="109" width="340" height="67" rx="14" fill="#d7eae7"/>
-  <text x="518" y="138" class="node" text-anchor="middle">Web 控制台</text>
-  <text x="518" y="160" class="detail" text-anchor="middle">选择网关、测试连通性</text>
-  <path d="M518 178V205H189" class="control"/>
-  <path d="M189 204V234" class="control" marker-end="url(#control)"/>
-  <path d="M518 204V234" class="control" marker-end="url(#control)"/>
-  <text x="32" y="222" class="section" text-anchor="start">应用配置</text>
-  <rect x="32" y="241" width="313" height="76" rx="14" fill="#e6eeeb"/>
-  <rect x="364" y="241" width="324" height="76" rx="14" fill="#e6eeeb"/>
-  <text x="188" y="273" class="node" text-anchor="middle">CLI / Python SDK</text>
-  <text x="188" y="298" class="detail" text-anchor="middle">为应用设置代理环境变量</text>
-  <text x="526" y="273" class="node" text-anchor="middle">SSH / Docker</text>
-  <text x="526" y="298" class="detail" text-anchor="middle">配置指定节点或容器</text>
-  <path d="M526 319V342H116" class="control"/>
-  <path d="M188 319V342" class="control"/>
-  <path d="M116 342V379" class="control" marker-end="url(#control)"/>
-  <text x="32" y="364" class="section" text-anchor="start">网络请求</text>
-  <rect x="32" y="390" width="170" height="56" rx="14" fill="#d7eae7"/>
-  <rect x="264" y="390" width="190" height="56" rx="14" fill="#17645b"/>
-  <rect x="516" y="390" width="172" height="56" rx="14" fill="#d7eae7"/>
-  <text x="117" y="426" class="node" text-anchor="middle">应用进程</text>
-  <text x="359" y="426" class="highlight" text-anchor="middle">已有代理</text>
-  <text x="602" y="426" class="node" text-anchor="middle">目标服务</text>
-  <path d="M209 418H251" class="traffic" marker-end="url(#traffic)"/>
-  <path d="M461 418H503" class="traffic" marker-end="url(#traffic)"/>
+<svg xmlns="http://www.w3.org/2000/svg" lang="zh" viewBox="0 0 1112 650" role="img" aria-labelledby="title desc">
+<title id="title">控制台如何配置节点，应用如何发出请求</title><desc id="desc">虚线为管理路径。CLI 或 SDK 也能独立配置本机任务。实线为应用通过已有 HTTP 代理访问目标服务的路径。</desc>
+<defs>
+  <marker id="ctrl-end" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="#566883"/></marker>
+  <marker id="flow-end" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="#137568"/></marker>
+</defs>
+<style>
+  text {font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;fill:#163d40}
+  .title {font-size:34px;font-weight:700} .section {font-size:20px;font-weight:650;fill:#446361}
+  .node {font-size:25px;font-weight:660} .detail {font-size:17px;fill:#40585b}
+  .route {font-size:16px;font-weight:600;fill:#455971} .light {font-size:25px;font-weight:700;fill:white}
+  .subtle {font-size:18px;fill:#dcf3ed} .legend {font-size:18px;fill:#3d565c}
+  .ctrl,.flow {fill:none;stroke-linejoin:round;stroke-linecap:round;stroke-width:2.6}
+  .ctrl {stroke:#566883;stroke-dasharray:5 5} .flow {stroke:#137568;stroke-width:3}
+</style>
+<rect x="0" y="0" width="1112" height="650" rx="12" fill="#f8faf7" stroke="none"/>
+<text x="32" y="57" class="title">控制台如何配置节点，应用如何发出请求</text>
+<path d="M33 95h44" class="ctrl" marker-end="url(#ctrl-end)"/>
+<text x="91" y="101" class="legend">配置与管理</text>
+<path d="M262 95h44" class="flow" marker-end="url(#flow-end)"/>
+<text x="320" y="101" class="legend">应用请求</text>
+<path d="M32 128h1048" stroke="#cfddda"/>
+<text x="32" y="168" class="section">入口</text>
+<text x="408" y="168" class="section">执行任务的位置</text>
+<text x="857" y="168" class="section">网络出口</text>
+<rect x="32" y="193" width="263" height="86" rx="12" fill="#e8eaf1" stroke="none"/>
+<text x="50" y="228" class="node">CLI / Python SDK</text>
+<text x="50" y="255" class="detail">可独立使用</text>
+<path d="M297 222H397" class="ctrl" marker-end="url(#ctrl-end)"/>
+<rect x="32" y="315" width="263" height="80" rx="12" fill="#e8eaf1" stroke="none"/>
+<text x="50" y="349" class="node">浏览器</text>
+<text x="50" y="376" class="detail">本机访问或 SSH 隧道</text>
+<path d="M160 398v40" class="ctrl" marker-end="url(#ctrl-end)"/>
+<rect x="32" y="449" width="263" height="93" rx="12" fill="#e8eaf1" stroke="none"/>
+<text x="50" y="488" class="node">Web 控制台</text>
+<text x="50" y="517" class="detail">网关配置、诊断与节点管理</text>
+<path d="M297 493H316V260H397" class="ctrl" marker-end="url(#ctrl-end)"/>
+<text x="328" y="252" class="route">启动任务</text>
+<path d="M316 359H397" class="ctrl" marker-end="url(#ctrl-end)"/>
+<text x="338" y="349" class="route">SSH</text>
+<path d="M316 493H397" class="ctrl" marker-end="url(#ctrl-end)"/>
+<text x="338" y="483" class="route">SSH</text>
+<rect x="408" y="193" width="329" height="86" rx="12" fill="#e1eeea" stroke="none"/>
+<text x="428" y="228" class="node">本机任务</text>
+<text x="428" y="255" class="detail">本机应用 / 子进程</text>
+<rect x="408" y="309" width="329" height="108" rx="12" fill="#e1eeea" stroke="none"/>
+<text x="428" y="344" class="node">Linux 节点</text>
+<text x="428" y="372" class="detail">SSH 直连目标账号</text>
+<text x="428" y="397" class="detail">该账号运行的应用进程</text>
+<rect x="408" y="448" width="329" height="173" rx="12" fill="#eef4ef" stroke="#96aea6"/>
+<text x="428" y="483" class="node">Docker 宿主机</text>
+<path d="M442 494v24" class="ctrl" marker-end="url(#ctrl-end)"/>
+<text x="462" y="512" class="route">docker exec</text>
+<rect x="427" y="526" width="291" height="78" rx="12" fill="#d9e9e2" stroke="none"/>
+<text x="445" y="558" class="node">目标容器</text>
+<text x="445" y="585" class="detail">容器内的应用进程</text>
+<path d="M739 235H794V561H720" class="flow"/>
+<path d="M739 361H846" class="flow" marker-end="url(#flow-end)"/>
+<circle cx="794" cy="361" r="4.5" fill="#137568"/>
+<rect x="857" y="312" width="223" height="97" rx="12" fill="#146258" stroke="none"/>
+<text x="877" y="354" class="light">HTTP 代理网关</text>
+<text x="877" y="383" class="subtle">由用户提供</text>
+<path d="M966 412v74" class="flow" marker-end="url(#flow-end)"/>
+<rect x="857" y="498" width="223" height="95" rx="12" fill="#d9eae4" stroke="none"/>
+<text x="877" y="538" class="node">目标服务</text>
+<text x="877" y="566" class="detail">HTTP / HTTPS</text>
 </svg>

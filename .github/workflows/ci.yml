@@ -31,6 +31,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -X utf8 -m unittest discover -s test
+      - name: Install and exercise the release wheel outside the repository
+        if: matrix.target == 'windows-x64' || matrix.target == 'linux-x64'
+        run: python -X utf8 packaging/test_wheel.py
       - run: python packaging/build_portable.py "${{ matrix.target }}"
       - name: Install browser test driver
         run: |

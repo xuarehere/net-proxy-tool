@@ -24,7 +24,7 @@ For checksums, source installation, shutdown and port conflicts, see the [quick 
 
 ![The console and CLI configure applications. Applications send requests through an existing proxy. SSH and Docker can configure remote nodes.](docs/assets/architecture.en.svg)
 
-Applications send traffic directly to the chosen gateway. The Web console manages configuration and diagnostics. You can make your first request with zero SSH nodes. Each remote node must also be able to reach its assigned gateway. [Open the full-size SVG](docs/assets/architecture.en.svg)
+The browser connects locally or through an SSH tunnel. Dashed lines show the console starting a local task, configuring a Linux account over SSH or using `docker exec` on a host to reach its container. The CLI and SDK can run local tasks independently. Solid lines follow each application's request through the user's HTTP proxy to its destination. [Open the full-size SVG to zoom on mobile](docs/assets/architecture.en.svg)
 
 ![First-run Web console with fields for a gateway name, host and port, and a proxy request test](docs/assets/console.png)
 
