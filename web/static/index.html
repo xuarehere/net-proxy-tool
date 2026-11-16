@@ -6,8 +6,8 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>Net-Proxy-Tool 通用跨平台局域网出海与 Docker 容器隔离控制中心 (v1.3.0)</title>
-  <link rel="stylesheet" href="style.css?v=1.3.0">
+  <title>Net-Proxy-Tool 通用跨平台局域网出海与 Docker 容器隔离控制中心 (v1.4.0)</title>
+  <link rel="stylesheet" href="style.css?v=1.4.0">
 </head>
 <body>
   <div class="app-layout">
@@ -16,15 +16,15 @@
       <div class="navbar-brand">
         <span class="brand-icon">🚀</span>
         <div class="brand-info">
-          <h1>Net-Proxy-Tool <span class="tag-version">v1.3.0</span></h1>
-          <p class="brand-sub">纯净零依赖 · 进程级沙箱 · x86/ARM/Win/Mac/Linux 全架构通用 · 多网关/多节点拓扑</p>
+          <h1>Net-Proxy-Tool <span class="tag-version">v1.4.0</span></h1>
+          <p class="brand-sub">HTTP 代理控制台</p>
         </div>
       </div>
 
       <div class="navbar-right">
         <div class="global-status-pill" id="global-status-pill">
-          <span class="status-indicator-dot online"></span>
-          <span id="global-gw-status-text">网关: 192.168.1.100:7890</span>
+          <span class="status-indicator-dot"></span>
+          <span id="global-gw-status-text">尚未选择网关</span>
         </div>
         <!-- 导航 Tabs -->
         <nav class="nav-tab-group">
@@ -51,10 +51,27 @@
       <!-- TAB 1: 🎯 接入向导 (Setup Wizard, 4 步渐进流水线) -->
       <!-- ============================================================== -->
       <div class="tab-pane active" id="tab-wizard">
+        <section class="card setup-card" aria-labelledby="setup-title">
+          <div class="card-header"><h2 id="setup-title">连接你的 HTTP 代理</h2></div>
+          <p>填写已运行的 HTTP 或 mixed 代理监听地址。控制台从运行它的机器发送请求，本机代理请填写 127.0.0.1。</p>
+          <form id="setup-form">
+            <div class="setup-fields">
+              <label>网关名称<input id="setup-name" class="form-input" required value="本机代理"></label>
+              <label>代理地址<input id="setup-host" class="form-input" required placeholder="127.0.0.1"></label>
+              <label>端口<input id="setup-port" class="form-input" type="number" required min="1" max="65535" placeholder="7890"></label>
+            </div>
+            <button class="btn btn-secondary" id="setup-save" type="submit">保存网关</button>
+            <label class="setup-url">请求目标<input id="setup-url" class="form-input" type="url" value="https://example.com/"></label>
+            <button class="btn btn-primary" id="setup-test" type="button">发送代理请求</button>
+            <output id="setup-result" role="status" aria-live="polite"></output>
+            <p id="setup-command" hidden></p>
+          </form>
+        </section>
+        <details id="advanced-wizard"><summary>为远程机器或容器配置代理</summary>
         <div class="wizard-header-banner">
           <div class="banner-title">
             <h2>🎯 业务节点网络穿透与代理接入向导</h2>
-            <p>为当前或任意新接入的业务节点提供清晰的 4 步渐进式开通流程。按序完成每一步骤，前置步骤通过后自动解锁后续步骤。</p>
+            <p>要为 Linux 账号或容器保存长期代理设置时，请依次选择网关、目标节点并检查连接。</p>
           </div>
           <div class="stepper-pipeline">
             <div class="pipeline-step active" id="pipe-step-1">
@@ -90,7 +107,7 @@
               <span class="step-status-tag" id="status-tag-step-1">● 等待探测</span>
             </div>
             <p class="step-explain">
-              网关节点是具有科学出网权限的跳板机器（例如配置有 Clash Verge 的 183 工作站）。请选择网关并验证端口是否畅通：
+              选择目标节点能连接的 HTTP 或混合代理网关。下方按钮从控制台经过该网关请求测试站点。
             </p>
             <div class="step-body-row">
               <div class="input-inline-group">
@@ -119,7 +136,7 @@
               <span class="step-status-tag" id="status-tag-step-2">🔒 待解锁</span>
             </div>
             <p class="step-explain">
-              选择需要出海访问的业务节点（例如 186 边缘 AI 计算节点、开发工作站或任意新接入的机器）。支持在下方直接登记新机器：
+              选择需要出海访问的业务节点（例如边缘计算节点、开发工作站或任意新接入的机器）。支持在下方直接登记新机器：
             </p>
             <div class="step-body-row">
               <div class="input-inline-group">
@@ -164,7 +181,7 @@
               <span class="step-status-tag" id="status-tag-step-3">🔒 待解锁</span>
             </div>
             <p class="step-explain">
-              通过选定网关，对研发核心服务（代码托管、预训练大模型、官方依赖仓库等 7 大目标）发起真实沙箱嗅探，验证实际出海能力：
+              控制台将通过所选网关请求配置中的目标站点，记录各自的 HTTP 状态和耗时。
             </p>
             <div class="diag-action-bar">
               <button class="btn btn-primary" id="wizard-start-diag-btn">
@@ -182,7 +199,7 @@
             <div class="card-header">
               <div class="step-badge-title">
                 <span class="step-badge">步骤 4</span>
-                <h3>Web 自动化开通与免命令出海交付 (Zero-Command Automation Handover)</h3>
+                <h3>下发代理配置并验证目标节点</h3>
               </div>
               <span class="step-status-tag success" id="status-tag-step-4">🎯 待交付</span>
             </div>
@@ -190,8 +207,8 @@
             <div class="handover-banner">
               <span class="handover-icon">🎉</span>
               <div class="handover-text">
-                <h4>全链路穿透验证通过，节点已接入自动化下发通道！</h4>
-                <p>当前目标节点: <strong id="handover-target-name">Docker 独立开发容器</strong> | 默认网关: <strong id="handover-gw-name">192.168.1.100:7890</strong></p>
+                <h4>请确认目标和网关，再下发代理配置。</h4>
+                <p>当前目标节点: <strong id="handover-target-name">未选择</strong> | 默认网关: <strong id="handover-gw-name">未选择</strong></p>
               </div>
             </div>
 
@@ -202,10 +219,10 @@
                   <span class="auto-node-icon">🚀</span>
                   <div class="auto-node-text">
                     <div class="auto-node-title-row">
-                      <h4 id="wizard-target-disp-name">Docker 独立开发容器</h4>
-                      <span class="switch-badge off" id="wizard-switch-badge">⚪ 当前处于原生直连状态 (未开启出海)</span>
+                      <h4 id="wizard-target-disp-name">未选择</h4>
+                      <span class="switch-badge off" id="wizard-switch-badge">⚪ 未启用托管代理</span>
                     </div>
-                    <p class="auto-node-sub" id="wizard-target-disp-sub">目标 IP: 192.168.1.102 | 出海出口: 192.168.1.100:7890 | 隔离性: 宿主机与其他容器 100% 保持直连</p>
+                    <p class="auto-node-sub" id="wizard-target-disp-sub">选择目标后将在此显示账号或容器。</p>
                   </div>
                 </div>
               </div>
@@ -213,10 +230,10 @@
               <!-- 核心一键操作按钮组 -->
               <div class="auto-action-buttons">
                 <button class="btn btn-primary btn-lg" id="wizard-btn-proxy-on">
-                  <span class="btn-icon">⚡</span> Web 一键开通出海通道 (免命令直接出海)
+                  <span class="btn-icon">⚡</span> 开启节点代理
                 </button>
                 <button class="btn btn-secondary btn-lg" id="wizard-btn-proxy-off">
-                  <span class="btn-icon">🛑</span> 一键关闭出海通道 (恢复直连)
+                  <span class="btn-icon">🛑</span> 关闭并恢复节点配置
                 </button>
                 <button class="btn btn-outline btn-lg" id="wizard-btn-node-test">
                   <span class="btn-icon">🔍</span> 实时复测目标连通性
@@ -232,14 +249,14 @@
                 <div class="feedback-content" id="wizard-feedback-content"></div>
               </div>
 
-              <!-- 免命令与零污染技术说明 -->
+              <!-- 目标设置与恢复 -->
               <div class="clean-guarantee-box highlight-guarantee">
                 <span class="shield-icon">🛡️</span>
                 <div class="guarantee-text">
-                  <strong>核心优势保障：</strong>
+                  <strong>操作范围与恢复</strong>
                   <ul class="guarantee-list">
-                    <li><strong>免终端敲命令：</strong>在上方点击【Web 一键开通出海通道】后，系统自动通过自动化运维通道下发配置。开通后，直接在目标机器/容器中执行日常命令（如 <code>curl https://www.google.com</code>、<code>git clone</code>、<code>pip install</code>）即可直接出海，无需输入任何 proxy 命令！</li>
-                    <li><strong>绝对环境隔离与零破坏：</strong>对于 Docker 容器，仅在该容器内部挂载出海通道；70 宿主机及其他 10+ 个生产容器 100% 保持直连，全局 <code>/etc/environment</code>、系统注册表绝无任何残留修改。</li>
+                    <li>开启后，目标账号的 curl、wget、pip 和 Git 可读取各自的代理设置。依赖 shell 环境变量的程序请在新终端中验证。</li>
+                    <li>容器模式在所选容器内执行配置脚本。以 root 运行时可能修改目标系统级配置；关闭时按快照恢复，遇到冲突要先核对人工修改。</li>
                   </ul>
                 </div>
               </div>
@@ -254,6 +271,7 @@
             </details>
           </section>
         </div>
+      </details>
       </div>
 
 
@@ -265,18 +283,18 @@
         <div class="metrics-row">
           <div class="metric-card">
             <span class="m-label">当前活跃代理网关</span>
-            <div class="m-val" id="sb-active-gw-val">192.168.1.100:7890</div>
-            <span class="m-sub" id="sb-active-gw-sub">局域网代理工作站 (Clash Verge / Mihomo)</span>
+            <div class="m-val" id="sb-active-gw-val">尚未配置</div>
+            <span class="m-sub" id="sb-active-gw-sub">请在接入向导保存网关</span>
           </div>
           <div class="metric-card">
-            <span class="m-label">网关 TCP 状态</span>
-            <div class="m-val green" id="sb-gw-status-val">● 连通正常</div>
-            <span class="m-sub" id="sb-gw-rtt-sub">响应耗时: 85 ms</span>
+            <span class="m-label">网关 TCP 连接</span>
+            <div class="m-val green" id="sb-gw-status-val">尚未检测</div>
+            <span class="m-sub" id="sb-gw-rtt-sub">点击下方「刷新连通性」</span>
           </div>
           <div class="metric-card">
-            <span class="m-label">外网穿透达标率</span>
-            <div class="m-val blue" id="sb-diag-rate-val">7 / 7 服务在线</div>
-            <span class="m-sub" id="sb-diag-summary">Google / GitHub / HF / OpenAI 全部正常</span>
+            <span class="m-label">目标 HTTP 请求</span>
+            <div class="m-val blue" id="sb-diag-rate-val">尚未检测</div>
+            <span class="m-sub" id="sb-diag-summary">点击刷新检查目标响应</span>
           </div>
         </div>
 
@@ -284,8 +302,8 @@
         <section class="card sandbox-exec-card">
           <div class="card-header">
             <div class="title-with-desc">
-              <h2>⚡ 任务按需代理沙箱执行器</h2>
-              <span class="tag tag-sandbox">进程级沙箱 · 用完即毁 · 零环境污染</span>
+              <h2>⚡ 在控制台主机运行命令</h2>
+              <span class="tag tag-sandbox">以控制台账号权限执行，请确认输入的命令</span>
             </div>
             <div class="header-actions">
               <button class="btn btn-secondary btn-sm" id="sb-quick-diag-btn">
@@ -307,8 +325,6 @@
                   <option value="curl -I https://www.google.com">Google 连通性测试 (curl -I)</option>
                   <option value="curl -I https://github.com">GitHub 连通性测试 (curl -I)</option>
                   <option value="curl -s https://api.github.com/zen">GitHub Zen API 测试</option>
-                  <option value="python -c &quot;import urllib.request; print(urllib.request.urlopen('https://www.google.com').getcode())&quot;">Python 内置库请求 Google</option>
-                  <option value="pip --version">查看 Pip 环境版本</option>
                 </select>
               </div>
 
@@ -320,7 +336,7 @@
               </div>
 
               <button class="btn btn-primary" id="sb-run-btn">
-                <span class="btn-icon">🚀</span> 在代理沙箱中运行
+                <span class="btn-icon">🚀</span> 使用代理运行
               </button>
             </div>
           </div>
@@ -333,13 +349,13 @@
                 <span class="t-light yellow"></span>
                 <span class="t-light green"></span>
               </div>
-              <span class="terminal-title">Sandbox Execution Output (Pure Process Isolation)</span>
+              <span class="terminal-title">命令输出</span>
               <div class="terminal-actions">
                 <span id="sb-status-badge" class="badge-status idle">空闲就绪</span>
                 <button id="sb-clear-term-btn" class="btn-mini">清屏</button>
               </div>
             </div>
-            <pre id="sb-terminal-output" class="terminal-view"><span class="t-dim"># 控制台已就绪。输入待运行命令后点击【在代理沙箱中运行】...</span></pre>
+            <pre id="sb-terminal-output" class="terminal-view"><span class="t-dim"># 控制台已就绪。输入待运行命令后点击【使用代理运行】...</span></pre>
           </div>
         </section>
       </div>
@@ -360,8 +376,8 @@
               <button class="btn btn-secondary" id="top-enable-all-btn" title="一键将列表中的所有节点切换为出海状态">
                 <span class="btn-icon">⚡</span> 一键全部出海
               </button>
-              <button class="btn btn-danger-soft" id="top-disable-all-btn" title="一键切断所有节点代理，恢复100%原生直连">
-                <span class="btn-icon">🛑</span> 一键恢复全部直连
+              <button class="btn btn-danger-soft" id="top-disable-all-btn" title="按每个节点的快照恢复托管配置">
+                <span class="btn-icon">🛑</span> 关闭全部节点代理
               </button>
               <button class="btn btn-secondary" id="top-health-check-btn" title="对所有节点并发探测出海状态与延迟">
                 <span class="btn-icon">🔄</span> 全网巡检
@@ -387,7 +403,7 @@
                 <option value="docker">🐳 仅 Docker 容器</option>
                 <option value="linux">🐧 仅 Linux 物理机 / 工作站</option>
                 <option value="proxy_on">⚡ 仅出海中节点</option>
-                <option value="proxy_off">🛑 仅原生直连节点</option>
+                <option value="proxy_off">🛑 仅未启用托管代理的节点</option>
               </select>
             </div>
             <div class="node-stats-pill" id="node-stats-badge">共 4 个节点</div>
@@ -448,7 +464,7 @@
           <div class="card-header">
             <div class="title-with-desc">
               <h2>🛡️ 局域网直连白名单规则 (NO_PROXY)</h2>
-              <p class="card-subdesc">命中以下名单的内网 IP 与域名将强制直接通信，严禁代理绕路，保证内网通信绝对安全</p>
+              <p class="card-subdesc">接受 NO_PROXY 的工具会按此列表绕过代理。域名通配和 CIDR 的支持取决于具体工具。</p>
             </div>
           </div>
           <div class="noproxy-box">
@@ -468,174 +484,54 @@
       <!-- TAB 4: 📖 开发者手册 (Developer Handbook) -->
       <!-- ============================================================== -->
       <div class="tab-pane" id="tab-handbook">
-        <section class="card handbook-hero">
+        <section class="card">
           <div class="card-header">
             <div class="title-with-desc">
-              <h2>📖 跨平台客户端开箱即用开发者速查手册</h2>
-              <p class="card-subdesc">基于 Python 3 标准库的轻量级纯净驱动，各平台开箱即用，任务退出自动注销</p>
+              <h2>开发者手册</h2>
+              <p class="card-subdesc">先在「接入向导」保存已有的 HTTP 或混合代理网关，点击「发送代理请求」。收到 HTTP 2xx 后，可按需要选择以下用法。</p>
             </div>
-            <span class="tag tag-clean">纯原生标准库 · 零 pip 依赖 · 零环境污染</span>
           </div>
-        </section>
-
-        <div class="handbook-grid">
-          <!-- Web 控制台一键开箱配方 (3分钟上手) -->
-          <div class="code-card full-width">
-            <div class="code-card-header">
-              <span class="os-pill" style="background:rgba(56,189,248,0.2);color:#38bdf8;">🚀 场景化 3 步极速开箱配方 (Web 界面操作)</span>
-              <button class="btn-copy" data-target="hb-code-web-recipes">复制代码</button>
+          <p><a href="https://github.com/xuarehere/net-proxy-tool" target="_blank" rel="noopener noreferrer">项目主页</a> ·
+             <a href="https://github.com/xuarehere/net-proxy-tool/blob/main/QUICKSTART.md" target="_blank" rel="noopener noreferrer">首次使用指南</a> ·
+             <a href="https://github.com/xuarehere/net-proxy-tool/blob/main/docs/operations.md" target="_blank" rel="noopener noreferrer">远程接入与配置恢复</a></p>
+          <div class="handbook-grid">
+            <div class="code-card">
+              <div class="code-card-header"><strong>Windows 单次命令</strong><button class="btn-copy" data-target="hb-win">复制命令</button></div>
+              <p>在便携包的解压目录打开 PowerShell。脚本使用包内 Python，为这一条 curl 命令设置代理。</p>
+              <pre id="hb-win"><code>.\bin\with-proxy.cmd curl.exe -I https://example.com/</code></pre>
             </div>
-            <pre id="hb-code-web-recipes"><code># 【配方 1: 映射端口 Docker 容器 (如自定义映射 6600 端口的容器)】
-# 步骤: 点击 [➕ 登记新业务节点] -> 选 [🚀 通用 SSH 直连接入] -> IP: 192.168.1.102, 端口: 6600, 用户: root
-# 认证方式: 首次无公钥选 [🔒 初始账号密码]，系统自动建信并植入公钥，后续自动免密！
-# 开通出海: 保存后点击对应行的 [⚡ 开启]，容器内无需输入任何代理命令，直接出海！
-
-# 【配方 2: x86_64 / ARM64 Linux 物理工作站 / GPU 服务器 / 工控机】
-# 步骤: 点击 [➕ 登记新业务节点] -> 选 [🚀 通用 SSH 直连接入] -> 端口: 22 -> 认证方式: [🔑 SSH 密钥免密]
-# 开通出海: 保存后点击对应行的 [⚡ 开启]，终端直接执行 curl / git / pip 瞬间出海！
-
-# 【配方 3: 未暴露 SSH 的轻量 Docker 容器 (宿主机 docker exec 穿透)】
-# 步骤: 点击 [➕ 登记新业务节点] -> 选 [🐳 宿主机 Docker 穿透接入] -> 填容器名与宿主机 IP
-# 隔离保障: 仅该独立容器出海，宿主机与其余所有容器 100% 保持纯净直连，零环境污染！</code></pre>
-          </div>
-
-          <!-- 终端零命令极速验证 -->
-          <div class="code-card full-width">
-            <div class="code-card-header">
-              <span class="os-pill" style="background:rgba(34,197,94,0.2);color:#4ade80;">🎯 目标终端零命令出海检验 (无需 export 任何代理命令)</span>
-              <button class="btn-copy" data-target="hb-code-zero-cmd">复制代码</button>
+            <div class="code-card">
+              <div class="code-card-header"><strong>Linux / macOS 单次命令</strong><button class="btn-copy" data-target="hb-unix">复制命令</button></div>
+              <p>在便携包的解压目录执行。需要系统中已有 Bash 和 curl。源码包另需 Python 3.8 或更高版本。</p>
+              <pre id="hb-unix"><code>./bin/with-proxy curl -I https://example.com/</code></pre>
             </div>
-            <pre id="hb-code-zero-cmd"><code># 在目标工作站终端或 Docker 容器内，直接执行下列命令，返回 HTTP 200 即代表出海成功:
-curl -I https://www.google.com
+            <div class="code-card">
+              <div class="code-card-header"><strong>Python SDK</strong><button class="btn-copy" data-target="hb-sdk">复制示例</button></div>
+              <p>将代码保存为包根目录的 <code>check_proxy.py</code>，从同一目录运行。Windows 使用 <code>.\runtime\python.exe check_proxy.py</code>，Linux / macOS 使用 <code>./runtime/bin/python3 check_proxy.py</code>。退出上下文后会还原当前进程原有的代理环境变量。</p>
+              <pre id="hb-sdk"><code>from urllib.request import urlopen
+from sdk import ProxySession
 
-# 海外源码拉取与 Python 依赖安装:
-git clone https://github.com/octocat/Hello-World.git
-pip install requests openai</code></pre>
-          </div>
-
-          <!-- Linux Bash -->
-          <div class="code-card">
-            <div class="code-card-header">
-              <span class="os-pill linux">Linux 业务节点 (Bash, 186 / ARM64 / Ubuntu)</span>
-              <button class="btn-copy" data-target="hb-code-linux">复制代码</button>
-            </div>
-            <pre id="hb-code-linux"><code># 1. 单任务沙箱包装 (最推荐：命令结束代理立即销毁，环境保持纯净)
-./bin/with-proxy curl -I https://www.google.com
-./bin/with-proxy git clone https://github.com/octocat/Hello-World.git
-./bin/with-proxy pip install openai httpx
-
-# 2. 当前终端临时生效 (退出终端或执行 proxy-off 立即还原)
-source ./bin/proxy-on
-# 调试完成后还原环境:
-source ./bin/proxy-off</code></pre>
-          </div>
-
-          <!-- Windows PowerShell -->
-          <div class="code-card">
-            <div class="code-card-header">
-              <span class="os-pill win">Windows 开发者机 (PowerShell)</span>
-              <button class="btn-copy" data-target="hb-code-win-ps">复制代码</button>
-            </div>
-            <pre id="hb-code-win-ps"><code># 1. 单任务沙箱包装 (推荐)
-.\bin\with-proxy.ps1 curl.exe -I https://www.google.com
-.\bin\with-proxy.ps1 git clone https://github.com/octocat/Hello-World.git
-
-# 2. 当前 PowerShell 会话临时生效
-. .\bin\proxy-on.ps1
-# 退出注销
-. .\bin\proxy-off.ps1</code></pre>
-          </div>
-
-          <!-- Windows CMD -->
-          <div class="code-card">
-            <div class="code-card-header">
-              <span class="os-pill win">Windows 经典终端 (CMD)</span>
-              <button class="btn-copy" data-target="hb-code-win-cmd">复制代码</button>
-            </div>
-            <pre id="hb-code-win-cmd"><code>rem 单任务沙箱包装
-bin\with-proxy.cmd curl.exe -I https://www.google.com
-bin\with-proxy.cmd git clone https://github.com/octocat/Hello-World.git</code></pre>
-          </div>
-
-          <!-- 跨平台 Python CLI -->
-          <div class="code-card">
-            <div class="code-card-header">
-              <span class="os-pill py">跨平台 Python 通用命令行 (Win / Linux / macOS)</span>
-              <button class="btn-copy" data-target="hb-code-py-cli">复制代码</button>
-            </div>
-            <pre id="hb-code-py-cli"><code># 任何安装有 Python 3 的操作系统均可通用执行:
-python with_proxy.py curl -I https://www.google.com
-
-# 显式指定临时网关
-python with_proxy.py --gateway 192.168.1.100:7890 git clone ...</code></pre>
-          </div>
-
-          <!-- Python Native SDK -->
-          <div class="code-card full-width">
-            <div class="code-card-header">
-              <span class="os-pill py">Python 业务代码集成 SDK (零第三方包依赖，纯原生 Context Manager)</span>
-              <button class="btn-copy" data-target="hb-code-py-sdk">复制代码</button>
-            </div>
-            <pre id="hb-code-py-sdk"><code>from sdk.proxy_session import ProxySession
-
-# 进入 with 作用域自动挂载代理，离开作用域 (无论正常返回还是抛出异常) 强制销毁代理
 with ProxySession():
-    import urllib.request
-    resp = urllib.request.urlopen("https://api.github.com/zen")
-    print("GitHub Zen:", resp.read().decode())
-
-# 支持显式指定特定网关 (多对多按需切换)
-with ProxySession(gateway="192.168.1.100:7890"):
-    # 在此作用域内走指定工作站代理通道
-    pass</code></pre>
-          </div>
-
-          <!-- Docker 容器精准接入 (Zero Pollution) -->
-          <div class="code-card full-width">
-            <div class="code-card-header">
-              <span class="os-pill docker">Docker 独立容器精准代理 (仅目标容器出海，宿主机与其他容器 0 影响)</span>
-              <button class="btn-copy" data-target="hb-code-docker-wrapper">复制代码</button>
+    with urlopen("https://example.com/", timeout=10) as response:
+        print(response.status)</code></pre>
             </div>
-            <pre id="hb-code-docker-wrapper"><code># 1. 进入指定容器的交互终端 (自动注入出海代理，退出即还原)
-./bin/with-proxy-docker app-container /bin/bash
-
-# 2. 在指定容器内单任务沙箱运行 (不修改容器镜像，任务结束代理即刻销毁)
-./bin/with-proxy-docker app-container curl -I https://www.google.com
-./bin/with-proxy-docker app-container git clone https://github.com/octocat/Hello-World.git
-./bin/with-proxy-docker app-container pip install openai httpx
-
-# 3. 隔离性保证：
-# 宿主机环境：env | grep -i proxy 依然为空，宿主机直连无任何污染
-# 其他容器：docker exec other-container 没有 -e 代理，100% 原始直连网络</code></pre>
-          </div>
-
-          <!-- Docker 容器构建与运行按需代理 -->
-          <div class="code-card full-width">
-            <div class="code-card-header">
-              <span class="os-pill docker">Docker 容器构建镜像按需代理 (仅在 build 阶段有效)</span>
-              <button class="btn-copy" data-target="hb-code-docker">复制代码</button>
+            <div class="code-card">
+              <div class="code-card-header"><strong>容器内运行单次命令</strong><button class="btn-copy" data-target="hb-docker">复制示例</button></div>
+              <p>在有 Docker CLI 和容器访问权限的 Bash 终端执行。把 <code>app-container</code> 换为已运行且安装了 curl 的容器名称。控制台里保存的代理地址须从容器可达；容器内的 <code>127.0.0.1</code> 指向容器自身。</p>
+              <pre id="hb-docker"><code>./bin/with-proxy-docker app-container curl -I https://example.com/</code></pre>
             </div>
-            <pre id="hb-code-docker"><code># 临时构建镜像 (仅在 build 阶段注入代理，不污染镜像内部网络)
-docker build \
-    --build-arg HTTP_PROXY=http://192.168.1.100:7890 \
-    --build-arg HTTPS_PROXY=http://192.168.1.100:7890 \
-    --build-arg NO_PROXY="localhost,127.0.0.1,192.168.0.0/16" \
-    -t my-app .
-
-# 临时容器运行 (--rm 容器退出自动销毁)
-docker run --rm \
-    -e HTTP_PROXY=http://192.168.1.100:7890 \
-    -e HTTPS_PROXY=http://192.168.1.100:7890 \
-    my-app python main.py</code></pre>
           </div>
-        </div>
+          <h3>为远程账号长期启用代理</h3>
+          <p>在「拓扑与节点管理」登记 Linux 节点或容器，填写 SSH 用户、主机和实际端口。Windows 控制端使用 OpenSSH 密钥。宿主机 Docker 模式还需要该登录账号可执行 docker exec。保存后可先做预检。</p>
+          <p>显式开启时才会下发工具和 shell 配置。操作目标是所选账号或容器，以 root 执行时还可能修改目标系统级配置。关闭时按快照恢复。遇到人工编辑或旧版缺少快照时，请查看提示并核对备份。</p>
+        </section>
       </div>
     </main>
 
     <!-- 页脚 -->
     <footer class="app-footer">
-      <span>Net-Proxy-Tool v1.3.0 · 通用跨平台局域网出海与 Docker 容器隔离控制系统 · 纯 Python 原生零依赖</span>
-      <span>当前出网网关: <strong id="footer-gw-label">192.168.1.100:7890</strong></span>
+      <span>Net-Proxy-Tool v1.4.0 · HTTP 代理控制台</span>
+      <span>当前出网网关: <strong id="footer-gw-label">未配置</strong></span>
     </footer>
   </div>
 
@@ -653,7 +549,7 @@ docker run --rm \
         <div class="form-row">
           <div class="form-group half">
             <label>业务节点名称 *:</label>
-            <input type="text" id="form-client-name" class="form-input" placeholder="例如: 202 视觉检测服务器 / 70 容器 debug2">
+            <input type="text" id="form-client-name" class="form-input" placeholder="例如: 开发工作站 / 测试容器">
           </div>
           <div class="form-group half">
             <label>节点唯一标识 (ID, 留空自动生成):</label>
@@ -707,14 +603,14 @@ docker run --rm \
               <label>SSH 认证方式:</label>
               <select id="form-client-auth-type" class="form-select">
                 <option value="key">🔑 SSH 密钥免密 (默认推荐，已有公钥信任)</option>
-                <option value="password">🔒 初始账号密码 (支持未配密钥的新机器，自动植入公钥)</option>
+                <option value="password">🔒 密码认证（Linux / macOS 控制端）</option>
               </select>
             </div>
           </div>
           <div class="form-group" id="form-group-client-pass" style="display: none;">
-            <label>SSH 登录密码 (初次建信自愈使用):</label>
-            <input type="password" id="form-client-ssh-pass" class="form-input" placeholder="输入节点初始密码 (如: ubuntu 或 root)">
-            <div class="input-tip-sub">💡 工业场景免密自愈：首次输入密码连通后，系统将自动把控制节点公钥植入目标机器，后续所有操作彻底零密码！</div>
+            <label>SSH 登录密码</label>
+            <input type="password" id="form-client-ssh-pass" class="form-input" placeholder="输入远程账号密码">
+            <div class="input-tip-sub">Windows 控制端请使用 SSH 密钥。Linux / macOS 控制端首次以密码开启代理时，如有本机 SSH 公钥，会尝试加入目标账号的 authorized_keys。验证密钥登录成功后，才移除已保存的密码。</div>
           </div>
         </div>
 
@@ -728,6 +624,10 @@ docker run --rm \
             <div class="form-group half">
               <label>宿主机 IP 地址 *:</label>
               <input type="text" id="form-client-ssh-host" class="form-input" placeholder="例如: 192.168.1.102">
+            </div>
+            <div class="form-group half">
+              <label for="form-client-host-port">宿主机 SSH 端口</label>
+              <input type="number" id="form-client-host-port" class="form-input" value="22" min="1" max="65535">
             </div>
             <div class="form-group half">
               <label>宿主机免密用户名 *:</label>
@@ -801,7 +701,7 @@ docker run --rm \
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="modal-gw-test-btn">
-          <span class="btn-icon">⚡</span> 测试端口连通性
+          <span class="btn-icon">⚡</span> 测试代理请求
         </button>
         <button class="btn btn-primary" id="modal-gw-save-btn">
           <span class="btn-icon">💾</span> 保存网关
@@ -847,6 +747,6 @@ docker run --rm \
     </div>
   </div>
 
-  <script src="app.js?v=1.3.0"></script>
+  <script src="app.js?v=1.4.0"></script>
 </body>
 </html>

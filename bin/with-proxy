@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# net-proxy-tool: Linux/macOS CLI wrapper
 set -e
-TOOL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-# 优先使用 python3，若无则使用 python
-PYTHON_CMD="python3"
-if ! command -v python3 >/dev/null 2>&1; then
-    PYTHON_CMD="python"
-fi
-
-exec $PYTHON_CMD "${TOOL_DIR}/with_proxy.py" "$@"
+source "$(dirname "${BASH_SOURCE[0]}")/python-env.sh"
+exec "$npt_python" "$npt_root/with_proxy.py" "$@"

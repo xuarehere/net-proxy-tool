@@ -1,27 +1,15 @@
-FROM python:3.11-alpine
-
-LABEL maintainer="xuarehere"
-LABEL description="net-proxy-tool: Cross-Platform Native Proxy Orchestrator"
-
-# 安装 OpenSSH 客户端与 bash (用于节点 SSH 接入与探活)
-RUN apk add --no-cache openssh-client bash curl
-
+FROM python:3.12-alpine
+RUN apk add --no-cache openssh-client bash \
+    && addgroup -g 10001 proxytool \
+    && adduser -D -u 10001 -G proxytool proxytool
 WORKDIR /app
-
-# 拷贝应用代码与配置模板
-COPY config.example.json /app/config.example.json
-COPY with_proxy.py /app/with_proxy.py
-COPY sdk /app/sdk
-COPY bin /app/bin
-COPY web /app/web
-COPY gateway-watchdog /app/gateway-watchdog
-
-# 保证数据持久化目录存在
-RUN mkdir -p /app/data && chmod -R 755 /app/bin
-
+COPY config.example.json with_proxy.py ./
+COPY sdk/ sdk/
+COPY web/ web/
+RUN mkdir -p /app/data && chown proxytool:proxytool /app/data
+USER proxytool
+ENV NET_PROXY_CONFIG=/app/data/config.json NET_PROXY_BIND=0.0.0.0 PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 EXPOSE 8899
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD curl -f http://127.0.0.1:8899/api/config || exit 1
-
-ENTRYPOINT ["python3", "web/server.py"]
+HEALTHCHECK --interval=10s --timeout=3s --start-period=3s \
+    CMD python -c "import http.client; c=http.client.HTTPConnection('127.0.0.1',8899,timeout=2); c.request('GET','/api/health'); assert c.getresponse().status == 200"
+ENTRYPOINT ["python", "web/server.py", "8899"]

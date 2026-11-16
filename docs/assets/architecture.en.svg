@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" lang="en" viewBox="0 0 1112 650" role="img" aria-labelledby="title desc">
+<title id="title">How applications reach their destination</title><desc id="desc">Dashed lines show configuration paths. The CLI or SDK can configure a local task independently. Solid lines trace requests from apps through an existing HTTP proxy.</desc>
+<defs>
+  <marker id="ctrl-end" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="#566883"/></marker>
+  <marker id="flow-end" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="#137568"/></marker>
+</defs>
+<style>
+  text {font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;fill:#163d40}
+  .title {font-size:34px;font-weight:700} .section {font-size:20px;font-weight:650;fill:#446361}
+  .node {font-size:25px;font-weight:660} .detail {font-size:17px;fill:#40585b}
+  .route {font-size:16px;font-weight:600;fill:#455971} .light {font-size:25px;font-weight:700;fill:white}
+  .subtle {font-size:18px;fill:#dcf3ed} .legend {font-size:18px;fill:#3d565c}
+  .ctrl,.flow {fill:none;stroke-linejoin:round;stroke-linecap:round;stroke-width:2.6}
+  .ctrl {stroke:#566883;stroke-dasharray:5 5} .flow {stroke:#137568;stroke-width:3}
+</style>
+<rect x="0" y="0" width="1112" height="650" rx="12" fill="#f8faf7" stroke="none"/>
+<text x="32" y="57" class="title">How applications reach their destination</text>
+<path d="M33 95h44" class="ctrl" marker-end="url(#ctrl-end)"/>
+<text x="91" y="101" class="legend">Configuration</text>
+<path d="M262 95h44" class="flow" marker-end="url(#flow-end)"/>
+<text x="320" y="101" class="legend">Application traffic</text>
+<path d="M32 128h1048" stroke="#cfddda"/>
+<text x="32" y="168" class="section">Entry points</text>
+<text x="408" y="168" class="section">Where tasks run</text>
+<text x="857" y="168" class="section">Network</text>
+<rect x="32" y="193" width="263" height="86" rx="12" fill="#e8eaf1" stroke="none"/>
+<text x="50" y="228" class="node">CLI / Python SDK</text>
+<text x="50" y="255" class="detail">Optional standalone entry</text>
+<path d="M297 222H397" class="ctrl" marker-end="url(#ctrl-end)"/>
+<rect x="32" y="315" width="263" height="80" rx="12" fill="#e8eaf1" stroke="none"/>
+<text x="50" y="349" class="node">Browser</text>
+<text x="50" y="376" class="detail">Local URL or SSH tunnel</text>
+<path d="M160 398v40" class="ctrl" marker-end="url(#ctrl-end)"/>
+<rect x="32" y="449" width="263" height="93" rx="12" fill="#e8eaf1" stroke="none"/>
+<text x="50" y="488" class="node">Web console</text>
+<text x="50" y="517" class="detail">Gateways and diagnostics</text>
+<path d="M297 493H316V260H397" class="ctrl" marker-end="url(#ctrl-end)"/>
+<text x="328" y="252" class="route">Run task</text>
+<path d="M316 359H397" class="ctrl" marker-end="url(#ctrl-end)"/>
+<text x="338" y="349" class="route">SSH</text>
+<path d="M316 493H397" class="ctrl" marker-end="url(#ctrl-end)"/>
+<text x="338" y="483" class="route">SSH</text>
+<rect x="408" y="193" width="329" height="86" rx="12" fill="#e1eeea" stroke="none"/>
+<text x="428" y="228" class="node">Local task</text>
+<text x="428" y="255" class="detail">Local app / child process</text>
+<rect x="408" y="309" width="329" height="108" rx="12" fill="#e1eeea" stroke="none"/>
+<text x="428" y="344" class="node">Linux node</text>
+<text x="428" y="372" class="detail">SSH to the target account</text>
+<text x="428" y="397" class="detail">App running as that user</text>
+<rect x="408" y="448" width="329" height="173" rx="12" fill="#eef4ef" stroke="#96aea6"/>
+<text x="428" y="483" class="node">Docker host</text>
+<path d="M442 494v24" class="ctrl" marker-end="url(#ctrl-end)"/>
+<text x="462" y="512" class="route">docker exec</text>
+<rect x="427" y="526" width="291" height="78" rx="12" fill="#d9e9e2" stroke="none"/>
+<text x="445" y="558" class="node">Target container</text>
+<text x="445" y="585" class="detail">App in the container</text>
+<path d="M739 235H794V561H720" class="flow"/>
+<path d="M739 361H846" class="flow" marker-end="url(#flow-end)"/>
+<circle cx="794" cy="361" r="4.5" fill="#137568"/>
+<rect x="857" y="312" width="223" height="97" rx="12" fill="#146258" stroke="none"/>
+<text x="877" y="354" class="light">HTTP proxy</text>
+<text x="877" y="383" class="subtle">Provided by the user</text>
+<path d="M966 412v74" class="flow" marker-end="url(#flow-end)"/>
+<rect x="857" y="498" width="223" height="95" rx="12" fill="#d9eae4" stroke="none"/>
+<text x="877" y="538" class="node">Destination</text>
+<text x="877" y="566" class="detail">HTTP / HTTPS</text>
+</svg>

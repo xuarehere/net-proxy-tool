@@ -77,6 +77,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const formClientSshPass = document.getElementById("form-client-ssh-pass");
   const formClientContainer = document.getElementById("form-client-container");
   const formClientSshUser = document.getElementById("form-client-ssh-user");
+  const formClientHostPort = document.getElementById("form-client-host-port");
   const formClientSshHost = document.getElementById("form-client-ssh-host");
   const formClientSshUserHost = document.getElementById("form-client-ssh-user-host");
 
@@ -176,8 +177,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!res.ok) throw new Error("加载配置失败: " + res.status);
       appConfig = await res.json();
       renderAll();
-      // 首次加载自动对当前网关做一次轻量级预检
-      initPrecheck();
+
     } catch (err) {
       console.error(err);
       globalStatusText.textContent = "配置加载失败";
@@ -185,11 +185,77 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  const setupForm = document.getElementById("setup-form");
+  const setupResult = document.getElementById("setup-result");
+  const setupHost = document.getElementById("setup-host");
+  const setupPort = document.getElementById("setup-port");
+  const setupName = document.getElementById("setup-name");
+  const setupUrl = document.getElementById("setup-url");
+  const setupCommand = document.getElementById("setup-command");
+  const setupTest = document.getElementById("setup-test");
+
+  function setupPayload() {
+    return {name: setupName.value.trim(), host: setupHost.value.trim(), port: Number(setupPort.value), protocol: "http"};
+  }
+
+  async function postJson(path, payload) {
+    const response = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || response.statusText);
+    return data;
+  }
+
+  setupForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    const button = document.getElementById("setup-save");
+    button.disabled = true;
+    try {
+      const payload = setupPayload();
+      const editing = activeGateway && setupForm.dataset.gateway === activeGateway.id;
+      if (editing) payload.id = activeGateway.id;
+      await postJson(editing ? "/api/gateways/update" : "/api/gateways/add", payload);
+      await loadConfig();
+      setupResult.textContent = "已保存网关。点击“发送代理请求”以验证目标站点。";
+    } catch (error) {
+      setupResult.textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  setupTest.addEventListener("click", async () => {
+    if (!setupForm.reportValidity()) return;
+    setupTest.disabled = true;
+    setupCommand.hidden = true;
+    setupResult.textContent = "正在连接代理并请求目标站点…";
+    try {
+      const data = await postJson("/api/test-gateway", {...setupPayload(), target_url: setupUrl.value});
+      const stage = data.tcp_ok ? "TCP 已连接" : "TCP 连接失败";
+      const status = data.online ? "代理请求成功" : "代理请求失败";
+      setupResult.textContent = [stage, status, data.code && ("HTTP " + data.code),
+        data.latency_ms != null && (data.latency_ms + " ms"), data.error].filter(Boolean).join(" · ");
+      if (data.online) {
+        const curl = navigator.platform.startsWith("Win") ? "curl.exe" : "curl";
+        const host = setupHost.value.includes(":") ? "[" + setupHost.value + "]" : setupHost.value;
+        setupCommand.textContent = curl + ' --proxy "http://' + host + ':' + setupPort.value + '" --head https://example.com/';
+        setupCommand.hidden = false;
+      }
+    } catch (error) {
+      setupResult.textContent = error.message;
+    } finally {
+      setupTest.disabled = false;
+    }
+  });
+
   function renderAll() {
     const gateways = appConfig.gateways || [];
     activeGateway = gateways.find(g => g.id === appConfig.active_gateway_id) || gateways[0] || null;
 
     if (activeGateway) {
+      setupName.value = activeGateway.name;
+      setupHost.value = activeGateway.host;
+      setupPort.value = activeGateway.port;
+      setupForm.dataset.gateway = activeGateway.id;
       const gwStr = `${activeGateway.host}:${activeGateway.port}`;
       globalStatusText.textContent = `网关: ${gwStr}`;
       footerGwLabel.textContent = `${activeGateway.name} (${gwStr})`;
@@ -258,7 +324,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Step 1: 探测网关
   wizardTestGwBtn.addEventListener("click", async () => {
-    if (!selectedWizardGateway) return;
+    if (!selectedWizardGateway) { setupHost.focus(); return; }
     wizardTestGwBtn.disabled = true;
     wizardTestGwBtn.innerHTML = '<span class="btn-icon">⏳</span> 正在探测网关...';
     step1Result.className = "step-result-banner";
@@ -276,7 +342,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await res.json();
       if (data.online) {
         step1Result.className = "step-result-banner success";
-        step1Result.innerHTML = `<strong>✅ 连通成功！</strong> 网关 ${selectedWizardGateway.name} (${selectedWizardGateway.host}:${selectedWizardGateway.port}) 响应正常，延迟: <strong>${data.latency_ms} ms</strong>。已自动为您解锁步骤 2。`;
+        step1Result.innerHTML = `<strong>✅ 连通成功！</strong> 网关 ${escapeHtml(selectedWizardGateway.name)} (${escapeHtml(selectedWizardGateway.host)}:${selectedWizardGateway.port}) 响应正常，延迟: <strong>${data.latency_ms} ms</strong>。已自动为您解锁步骤 2。`;
         statusTagStep1.className = "step-status-tag success";
         statusTagStep1.textContent = "✅ 已就绪";
         pipeStep1.className = "pipeline-step completed";
@@ -286,13 +352,13 @@ document.addEventListener("DOMContentLoaded", () => {
         unlockStep2();
       } else {
         step1Result.className = "step-result-banner error";
-        step1Result.innerHTML = `<strong>❌ 端口不可达:</strong> ${data.error}。请检查网关是否启动 Clash 并配置了 <code>allow-lan: true</code>。`;
+        step1Result.textContent = "代理请求失败：" + (data.error || "请检查代理地址和监听端口");
         statusTagStep1.className = "step-status-tag";
         statusTagStep1.textContent = "❌ 连通失败";
       }
     } catch (err) {
       step1Result.className = "step-result-banner error";
-      step1Result.innerHTML = `<strong>请求异常:</strong> ${err.message}`;
+      step1Result.textContent = "请求异常：" + err.message;
     } finally {
       wizardTestGwBtn.disabled = false;
       wizardTestGwBtn.innerHTML = '<span class="btn-icon">⚡</span> 探测该网关连通性';
@@ -417,7 +483,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       });
 
-      if (onlineCount >= 2) {
+      if (results.length && onlineCount >= Math.min(2, results.length)) {
         step3Complete = true;
         statusTagStep3.className = "step-status-tag success";
         statusTagStep3.textContent = `✅ 穿透达标 (${onlineCount}/${results.length} 在线)`;
@@ -429,7 +495,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         statusTagStep3.className = "step-status-tag";
         statusTagStep3.textContent = `⚠️ 穿透异常 (${onlineCount}/${results.length} 在线)`;
-        alert("大部分境外目标站点未能通过代理访问，请检查 183 网关的节点配置或网络策略。");
+        alert("大部分境外目标站点未能通过代理访问，请检查所选网关的节点配置或网络策略。");
       }
     } catch (err) {
       statusTagStep3.textContent = "❌ 诊断请求异常";
@@ -462,8 +528,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function renderHandoverBlocks() {
-    const client = selectedWizardClient || (appConfig && appConfig.clients && appConfig.clients[0]) || { name: "业务计算节点", os_type: "linux", host: "192.168.1.101" };
-    const gw = selectedWizardGateway || activeGateway || { host: "192.168.1.100", port: 7890 };
+    const client = selectedWizardClient;
+    if (!client) return;
+    const gw = appConfig.gateways.find(g => g.id === client.bound_gateway_id) || activeGateway;
+    if (!gw) return;
     const osType = (client.os_type || "linux").toLowerCase();
 
     handoverTargetName.textContent = `${client.name} (${osType.toUpperCase()}, ${client.host})`;
@@ -471,162 +539,36 @@ document.addEventListener("DOMContentLoaded", () => {
     if (wizardTargetDispName) wizardTargetDispName.textContent = `${client.name} (${osType.toUpperCase()})`;
     if (wizardTargetDispSub) {
       if (osType === "docker") {
-        wizardTargetDispSub.textContent = `目标 IP: ${client.host} | 容器名: ${client.container_name || 'app-container'} | 隔离性: 宿主机与其他容器 100% 保持直连`;
+        wizardTargetDispSub.textContent = `目标 IP: ${client.host} | 容器名: ${client.container_name || 'app-container'}`;
       } else {
-        wizardTargetDispSub.textContent = `目标 IP: ${client.host} | 绑定出口: ${gw.host}:${gw.port} | 进程/会话隔离: 零系统环境残留`;
+        wizardTargetDispSub.textContent = `目标 IP: ${client.host} | 绑定出口: ${gw.host}:${gw.port}`;
       }
     }
 
     const isProxyOn = Boolean(client.is_proxy_enabled);
     if (wizardSwitchBadge) {
       wizardSwitchBadge.className = isProxyOn ? "switch-badge on" : "switch-badge off";
-      wizardSwitchBadge.textContent = isProxyOn ? "🟢 出海通道已激活 (全功能就绪)" : "⚪ 当前处于原生直连状态 (未开启出海)";
+      wizardSwitchBadge.textContent = isProxyOn ? "🟢 已启用托管代理" : "⚪ 未启用托管代理";
     }
 
     handoverBlocksContainer.innerHTML = "";
 
-    const hostUrl = window.location.host || (window.location.hostname ? `${window.location.hostname}:8899` : "127.0.0.1:8899");
-
-    if (osType === "docker") {
-      // Docker 容器专属交付指令 (100% 容器内部自主控制，隔离宿主机)
-      const cName = client.container_name || (client.id ? client.id.replace("node-", "") : "app-container");
-      handoverBlocksContainer.innerHTML = `
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 1: 在容器内部直接初始化独立代理开关 (最推荐：纯容器内自主操作，宿主机 0 影响)</span>
-            <button class="btn-copy" data-copy="curl -s http://${hostUrl}/container-init.sh | bash">复制代码</button>
-          </div>
-          <pre><code># 1. 直接在【容器内部】运行一次初始化命令 (自动就绪 proxy-on / proxy-off):
-curl -s http://${hostUrl}/container-init.sh | bash
-
-# 2. 从此在容器终端中可随时自主开启/关闭出海 (仅在当前容器生效，宿主机完全隔离):
-proxy-on           # 开启出海代理 (走 183 网关)
-proxy-off          # 关闭出海代理 (恢复直连)
-proxy-status       # 查看代理开关状态
-with-proxy &lt;命令&gt;  # 单次命令走代理 (如: with-proxy pip install openai)</code></pre>
-        </div>
-
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 2: 在容器内部临时一键开启/关闭 (零安装，当前 bash 窗口生效)</span>
-            <button class="btn-copy" data-copy="source &lt;(curl -s http://${hostUrl}/proxy-on)">复制代码</button>
-          </div>
-          <pre><code># 在容器内部任何终端中直接执行:
-# 开启出海:
-source &lt;(curl -s http://${hostUrl}/proxy-on)
-
-# 关闭出海:
-source &lt;(curl -s http://${hostUrl}/proxy-off)</code></pre>
-        </div>
-
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 3: 从 70 宿主机外部开关 (无需进入容器)</span>
-            <button class="btn-copy" data-copy="./bin/docker-proxy on ${cName}">复制代码</button>
-          </div>
-          <pre><code># 若处于 70 宿主机，也可直接外部开关该容器:
-./bin/docker-proxy on ${cName}      # 开启该容器代理
-./bin/docker-proxy off ${cName}     # 关闭该容器代理
-./bin/docker-proxy exec ${cName} /bin/bash  # 单次带代理进入容器终端</code></pre>
-        </div>
-      `;
-    } else if (osType === "windows") {
-      // Windows 交互命令
-      handoverBlocksContainer.innerHTML = `
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 1: 单任务进程沙箱包装执行 (执行完毕环境变量即刻销毁，最推荐)</span>
-            <button class="btn-copy" data-copy=".\\bin\\with-proxy.ps1 curl.exe -I https://www.google.com">复制代码</button>
-          </div>
-          <pre><code># PowerShell 执行任何命令 (自动注入 183 代理网关，任务完成即刻彻底清理):
-.\\bin\\with-proxy.ps1 curl.exe -I https://www.google.com
-.\\bin\\with-proxy.ps1 git clone https://github.com/octocat/Hello-World.git
-.\\bin\\with-proxy.ps1 pip install openai
-
-# 经典 CMD 终端执行:
-bin\\with-proxy.cmd curl.exe -I https://www.google.com</code></pre>
-        </div>
-
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 2: 当前 PowerShell 会话临时生效 (关闭终端窗口或注销即还原)</span>
-            <button class="btn-copy" data-copy=". .\\bin\\proxy-on.ps1">复制代码</button>
-          </div>
-          <pre><code># 临时挂载代理:
-. .\\bin\\proxy-on.ps1
-
-# 调试完毕后一键注销，恢复纯净环境:
-. .\\bin\\proxy-off.ps1</code></pre>
-        </div>
-
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 3: Python 代码零污染上下文管理器 (纯标准库，退出代码块自动清除)</span>
-            <button class="btn-copy" data-copy="from sdk.proxy_session import ProxySession&#10;with ProxySession():&#10;    # 你的业务代码">复制代码</button>
-          </div>
-          <pre><code>from sdk.proxy_session import ProxySession
-
-with ProxySession():
-    import urllib.request
-    resp = urllib.request.urlopen("https://www.google.com")
-    print("Google Status:", resp.getcode())</code></pre>
-        </div>
-      `;
+    let command;
+    let title;
+    if (osType === "windows") {
+      title = "在 Windows 工具目录中运行单次代理请求";
+      command = ".\\bin\\with-proxy.cmd curl.exe -I https://example.com/";
     } else {
-      // Linux / macOS 交互命令
-      handoverBlocksContainer.innerHTML = `
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 1: 任意路径免进入一键生效 (最推荐：利用控制台端点直接注入，杜绝路径报错)</span>
-            <button class="btn-copy" data-copy="source &lt;(curl -s http://${hostUrl}/proxy-on)">复制代码</button>
-          </div>
-          <pre><code># 在 186 或任意 Linux 机器的【任何目录】下直接执行 (无需先 cd 到工具目录):
-# 开启出海代理:
-source &lt;(curl -s http://${hostUrl}/proxy-on)
-
-# 关闭出海代理 (恢复直连):
-source &lt;(curl -s http://${hostUrl}/proxy-off)</code></pre>
-        </div>
-
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 2: 本地脚本会话级开关 (明确进入工具目录，杜绝 No such file 报错)</span>
-            <button class="btn-copy" data-copy="cd ~/net-proxy-tool && source bin/proxy-on">复制代码</button>
-          </div>
-          <pre><code># 明确指定目录进入执行:
-cd ~/net-proxy-tool && source bin/proxy-on
-
-# 调试完毕后一键注销，恢复纯净环境:
-cd ~/net-proxy-tool && source bin/proxy-off
-
-# 提示: 执行一次 ./install-cli.sh 后，在任何目录直接输入 proxy-on 即可全局生效！</code></pre>
-        </div>
-
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 3: 单任务进程沙箱包装执行 (任务完成即刻彻底清理)</span>
-            <button class="btn-copy" data-copy="~/net-proxy-tool/bin/with-proxy curl -I https://www.google.com">复制代码</button>
-          </div>
-          <pre><code># 使用绝对路径执行单任务 (自动走 ${gw.host}:${gw.port} 网关，任务退出环境自动销毁):
-~/net-proxy-tool/bin/with-proxy curl -I https://www.google.com
-~/net-proxy-tool/bin/with-proxy git clone https://github.com/octocat/Hello-World.git
-~/net-proxy-tool/bin/with-proxy pip install openai httpx</code></pre>
-        </div>
-
-        <div class="code-delivery-card">
-          <div class="code-delivery-header">
-            <span class="code-delivery-title">方式 4: Python 代码零污染上下文管理器 (纯标准库，退出代码块自动清除)</span>
-            <button class="btn-copy" data-copy="from sdk.proxy_session import ProxySession&#10;with ProxySession():&#10;    # 业务代码">复制代码</button>
-          </div>
-          <pre><code>from sdk.proxy_session import ProxySession
-
-with ProxySession():
-    import urllib.request
-    resp = urllib.request.urlopen("https://www.google.com")
-    print("Google Status:", resp.getcode())</code></pre>
-        </div>
-      `;
+      title = "开启节点代理后，在目标工作站或容器内验证";
+      command = "curl -I https://example.com/";
     }
+    const card = document.createElement("div");
+    card.className = "code-delivery-card";
+    card.innerHTML = '<div class="code-delivery-header"><span class="code-delivery-title"></span><button class="btn-copy">复制代码</button></div><pre><code></code></pre>';
+    card.querySelector(".code-delivery-title").textContent = title;
+    card.querySelector("code").textContent = command;
+    card.querySelector(".btn-copy").dataset.copy = command;
+    handoverBlocksContainer.appendChild(card);
 
     // 绑定复制按钮
     attachCopyButtons(handoverBlocksContainer);
@@ -659,8 +601,8 @@ with ProxySession():
       if (data.success) {
         selectedWizardClient.is_proxy_enabled = true;
         wizardSwitchBadge.className = "switch-badge on";
-        wizardSwitchBadge.textContent = "🟢 出海通道已激活 (全功能就绪)";
-        showWizardFeedback("success", "✅ 下发成功", `${data.message}\n目标现已具备原生出海能力！在终端中直接执行 curl https://www.google.com 或 git clone 即可直接访问外网，无需输入任何代理命令。`);
+        wizardSwitchBadge.textContent = "🟢 已启用托管代理";
+        showWizardFeedback("success", "✅ 下发成功", `${data.message}\n点击「实时复测目标连通性」，或从目标终端执行 curl -I https://example.com/。`);
         await loadConfig();
       } else {
         showWizardFeedback("error", "❌ 下发失败", `下发失败: ${data.error || '未知错误'}`);
@@ -675,7 +617,7 @@ with ProxySession():
   wizardBtnProxyOff?.addEventListener("click", async () => {
     if (!selectedWizardClient) return;
     wizardBtnProxyOff.disabled = true;
-    showWizardFeedback("warning", "⏳ 正在注销...", `正在注销目标【${selectedWizardClient.name}】的代理配置并恢复原生直连...`);
+    showWizardFeedback("warning", "⏳ 正在注销...", `正在恢复目标【${selectedWizardClient.name}】在本次配置前的设置…`);
     try {
       const res = await fetch("/api/node-switch", {
         method: "POST",
@@ -689,8 +631,8 @@ with ProxySession():
       if (data.success) {
         selectedWizardClient.is_proxy_enabled = false;
         wizardSwitchBadge.className = "switch-badge off";
-        wizardSwitchBadge.textContent = "⚪ 当前处于原生直连状态 (未开启出海)";
-        showWizardFeedback("success", "✅ 已关闭", `${data.message}\n目标网络环境已彻底清理，100% 恢复为原始局域网直连。`);
+        wizardSwitchBadge.textContent = "⚪ 未启用托管代理";
+        showWizardFeedback("success", "✅ 已关闭", `${data.message}`);
         await loadConfig();
       } else {
         showWizardFeedback("error", "❌ 关闭失败", `关闭失败: ${data.error || '未知错误'}`);
@@ -716,7 +658,7 @@ with ProxySession():
       if (data.online) {
         showWizardFeedback("success", "🟢 外网畅通", `✅ 外网探测成功！\n响应状态: ${data.status_line || 'HTTP 200 OK'}\n探测耗时: ${data.latency_ms} ms\n节点状态: ${data.message}`);
       } else {
-        showWizardFeedback("error", "⚪ 直连未通外网", `⚪ 目标无法直连外网或代理未激活。\n状态: ${data.status_line || '超时'}\n提示: ${data.message}`);
+        showWizardFeedback("error", "目标请求失败", `目标上的请求未成功。\n状态: ${data.status_line || '超时'}\n提示: ${data.message}`);
       }
     } catch (e) {
       showWizardFeedback("error", "❌ 探测失败", `探测异常: ${e.message}`);
@@ -776,7 +718,7 @@ with ProxySession():
 
       if (!response.ok) {
         const errText = await response.text();
-        sbTerminalOutput.innerHTML += `<span style="color:#ef4444;">[错误] HTTP ${response.status}: ${errText}</span>\n`;
+        sbTerminalOutput.innerHTML += `<span style="color:#ef4444;">[错误] HTTP ${response.status}: ${escapeHtml(errText)}</span>\n`;
         sbStatusBadge.className = "badge-status";
         sbStatusBadge.textContent = "失败";
         sbRunBtn.disabled = false;
@@ -801,20 +743,17 @@ with ProxySession():
             try {
               const event = JSON.parse(rawJson);
               if (event.type === "start") {
-                sbTerminalOutput.innerHTML += `<span style="color:#38bdf8;">$ with-proxy ${event.command}</span>\n`;
-                sbTerminalOutput.innerHTML += `<span class="t-dim">[网关出海通道: ${event.gateway}]</span>\n`;
+                sbTerminalOutput.innerHTML += `<span style="color:#38bdf8;">$ with-proxy ${escapeHtml(event.command)}</span>\n`;
+                sbTerminalOutput.innerHTML += `<span class="t-dim">[网关出海通道: ${escapeHtml(event.gateway)}]</span>\n`;
               } else if (event.type === "stdout") {
                 sbTerminalOutput.innerHTML += `${escapeHtml(event.line)}\n`;
               } else if (event.type === "finish") {
                 const color = event.exit_code === 0 ? "#10b981" : "#f59e0b";
-                sbTerminalOutput.innerHTML += `\n<span style="color:${color}; font-weight:bold;">${event.msg}</span>\n`;
-                if (event.env_clean) {
-                  sbTerminalOutput.innerHTML += `<span style="color:#10b981;">🛡️ [零污染安全核验] 任务结束，系统环境变量 HTTP_PROXY 保持为空，宿主机环境 100% 纯净无残留。</span>\n`;
-                }
+                sbTerminalOutput.innerHTML += `\n<span style="color:${color}; font-weight:bold;">${escapeHtml(event.msg)}</span>\n`;
                 sbStatusBadge.className = event.exit_code === 0 ? "badge-status success" : "badge-status";
                 sbStatusBadge.textContent = event.exit_code === 0 ? "执行完毕" : `退出码: ${event.exit_code}`;
               } else if (event.type === "error") {
-                sbTerminalOutput.innerHTML += `<span style="color:#ef4444;">[异常] ${event.msg}</span>\n`;
+                sbTerminalOutput.innerHTML += `<span style="color:#ef4444;">[异常] ${escapeHtml(event.msg)}</span>\n`;
                 sbStatusBadge.className = "badge-status";
                 sbStatusBadge.textContent = "异常";
               }
@@ -872,7 +811,7 @@ with ProxySession():
     const total = cachedClients.length;
     const onCount = cachedClients.filter(c => c.is_proxy_enabled).length;
     const offCount = total - onCount;
-    nodeStatsBadge.textContent = `共 ${total} 个节点 (${onCount} 出海中, ${offCount} 直连)`;
+    nodeStatsBadge.textContent = `共 ${total} 个节点 (${onCount} 已启用, ${offCount} 未启用)`;
   }
 
   function renderClientsTableRows(clientsToRender) {
@@ -888,7 +827,7 @@ with ProxySession():
       const gwName = boundGw ? `${boundGw.name}` : (c.bound_gateway_id || "默认");
       const tagsHtml = (c.tags || []).map(t => `<span class="tag-badge">${escapeHtml(t)}</span>`).join("");
       const isProxyOn = Boolean(c.is_proxy_enabled);
-      const isLocal = ["127.0.0.1", "localhost", window.location.hostname].includes(c.host) && (c.port == 22 || !c.port) && !c.container_name;
+      const isLocal = c.access_mode !== "docker_host" && ["127.0.0.1", "localhost", window.location.hostname].includes(c.host) && (c.port == 22 || !c.port) && !c.container_name;
 
       let addrBadge = '<span class="addr-badge">SSH直连</span>';
       let addrRow = `<code>${escapeHtml(c.ssh_user || 'root')}@${escapeHtml(c.host)}:${c.port || 22}</code>`;
@@ -898,7 +837,7 @@ with ProxySession():
         addrRow = `<code>127.0.0.1 (本机执行)</code>`;
       } else if (c.access_mode === "docker_host" || (c.container_name && !c.port)) {
         addrBadge = '<span class="addr-badge" style="background:rgba(234,179,8,0.15);color:#facc15;">Docker穿透</span>';
-        addrRow = `<code>${escapeHtml(c.ssh_user || 'ubuntu')}@${escapeHtml(c.ssh_host || c.host)}</code> <span style="font-size:11px;color:var(--text-dim);">&rarr; [${escapeHtml(c.container_name || c.name)}]</span>`;
+        addrRow = `<code>${escapeHtml(c.ssh_user || 'ubuntu')}@${escapeHtml(c.ssh_host || c.host)}:${c.port || 22}</code> <span style="font-size:11px;color:var(--text-dim);">&rarr; [${escapeHtml(c.container_name || c.name)}]</span>`;
       } else if (c.port && c.port != 22) {
         addrBadge = `<span class="addr-badge" style="background:rgba(6,182,212,0.15);color:#22d3ee;">端口映射容器 (:${c.port})</span>`;
       }
@@ -929,25 +868,25 @@ with ProxySession():
         <td>
           <div class="status-capsule ${isProxyOn ? 'on' : 'off'}">
             <span class="capsule-indicator">
-              ${isProxyOn ? '<span class="pulse-dot"></span>已出海' : '⚪ 直连'}
+              ${isProxyOn ? '<span class="pulse-dot"></span>已启用' : '⚪ 未启用'}
             </span>
-            <button class="capsule-btn ${isProxyOn ? 'btn-turn-off' : 'btn-turn-on'}" data-action="toggle-client" data-id="${c.id}" data-action-type="${isProxyOn ? 'off' : 'on'}">
+            <button class="capsule-btn ${isProxyOn ? 'btn-turn-off' : 'btn-turn-on'}" data-action="toggle-client" data-id="${escapeHtml(c.id)}" data-action-type="${isProxyOn ? 'off' : 'on'}">
               ${isProxyOn ? '🛑 关闭' : '⚡ 开启'}
             </button>
           </div>
         </td>
         <td style="text-align: right;">
           <div class="table-actions-modern">
-            <button class="btn-speedtest" data-action="test-node-out" data-id="${c.id}" title="实测出海延迟与连通状态">
-              🔍 测外网 <span class="rtt-pill" id="rtt-${c.id}"></span>
+            <button class="btn-speedtest" data-action="test-node-out" data-id="${escapeHtml(c.id)}" title="实测出海延迟与连通状态">
+              🔍 测外网 <span class="rtt-pill" id="rtt-${escapeHtml(c.id)}"></span>
             </button>
             <div class="action-dropdown-wrap">
               <button class="btn-dropdown-toggle" title="更多运维操作">•••</button>
               <div class="action-dropdown-menu">
-                <button class="dropdown-item" data-action="edit-client" data-id="${c.id}">✏️ 编辑参数</button>
-                <button class="dropdown-item" data-action="clone-client" data-id="${c.id}">📋 克隆节点</button>
-                <button class="dropdown-item" data-action="test-client" data-id="${c.id}" data-host="${c.host}" data-port="${c.port || 22}">⚡ 连通探测</button>
-                <button class="dropdown-item danger" data-action="delete-client" data-id="${c.id}">🗑️ 删除节点</button>
+                <button class="dropdown-item" data-action="edit-client" data-id="${escapeHtml(c.id)}">✏️ 编辑参数</button>
+                <button class="dropdown-item" data-action="clone-client" data-id="${escapeHtml(c.id)}">📋 克隆节点</button>
+                <button class="dropdown-item" data-action="test-client" data-id="${escapeHtml(c.id)}" data-host="${escapeHtml(c.host)}" data-port="${c.port || 22}">⚡ 连通探测</button>
+                <button class="dropdown-item danger" data-action="delete-client" data-id="${escapeHtml(c.id)}">🗑️ 删除节点</button>
               </div>
             </div>
           </div>
@@ -1020,7 +959,7 @@ with ProxySession():
               rttPill.textContent = "超时";
               rttPill.style.color = "#f87171";
             }
-            alert(`⚪ 节点处于直连或无法访问外网:\n状态: ${d.status_line || '超时'}\n说明: ${d.message}`);
+            alert(`目标上的请求未成功：\n状态: ${d.status_line || '超时'}\n说明: ${d.message}`);
           }
         } catch (e) {
           if (rttPill) rttPill.textContent = "ERR";
@@ -1134,7 +1073,7 @@ with ProxySession():
 
   // 一键全部切断代理恢复直连
   topDisableAllBtn?.addEventListener("click", async () => {
-    if (!confirm("⚠️ 确定要一键关闭所有节点的出海通道吗？\n这将彻底清除各节点和容器内的代理配置，全网恢复 100% 原生直连网络。")) {
+    if (!confirm("⚠️ 确定要一键关闭所有节点的出海通道吗？\n将按各节点的快照恢复托管配置。如有冲突，请核对操作结果和目标文件。")) {
       return;
     }
     topDisableAllBtn.disabled = true;
@@ -1147,12 +1086,12 @@ with ProxySession():
       });
       const d = await res.json();
       await loadConfig();
-      alert(d.message || "已恢复全部节点直连");
+      alert(d.message || "已完成批量关闭，请查看各节点结果");
     } catch (e) {
       alert("切断异常: " + e.message);
     } finally {
       topDisableAllBtn.disabled = false;
-      topDisableAllBtn.innerHTML = '<span class="btn-icon">🛑</span> 一键恢复全部直连';
+      topDisableAllBtn.innerHTML = '<span class="btn-icon">🛑</span> 关闭全部节点代理';
     }
   });
 
@@ -1248,10 +1187,10 @@ with ProxySession():
         <td style="color:var(--text-muted); font-size:12px;">${escapeHtml(g.description || '-')}</td>
         <td>
           <div class="table-actions">
-            ${!isDefault ? `<button class="btn-mini" data-action="set-default-gw" data-id="${g.id}">设为默认</button>` : ''}
-            <button class="btn-mini" data-action="test-gw" data-host="${g.host}" data-port="${g.port}">⚡ 测通</button>
-            <button class="btn-mini" data-action="edit-gw" data-id="${g.id}">✏️ 编辑</button>
-            ${!isDefault ? `<button class="btn-mini btn-danger" data-action="delete-gw" data-id="${g.id}">🗑️ 删除</button>` : ''}
+            ${!isDefault ? `<button class="btn-mini" data-action="set-default-gw" data-id="${escapeHtml(g.id)}">设为默认</button>` : ''}
+            <button class="btn-mini" data-action="test-gw" data-host="${escapeHtml(g.host)}" data-port="${escapeHtml(g.port)}">⚡ 测通</button>
+            <button class="btn-mini" data-action="edit-gw" data-id="${escapeHtml(g.id)}">✏️ 编辑</button>
+            ${!isDefault ? `<button class="btn-mini btn-danger" data-action="delete-gw" data-id="${escapeHtml(g.id)}">🗑️ 删除</button>` : ''}
           </div>
         </td>
       `;
@@ -1286,7 +1225,7 @@ with ProxySession():
           if (d.online) {
             alert(`网关 ${host}:${port} 端口连通正常！延迟: ${d.latency_ms} ms`);
           } else {
-            alert(`网关 ${host}:${port} 端口不可达: ${d.error}`);
+            alert(`网关 ${host}:${port} 请求失败: ${d.error}`);
           }
         } catch (e) {
           alert("探测异常: " + e.message);
@@ -1378,7 +1317,7 @@ with ProxySession():
         }
         if (formClientHint) {
           formClientHint.style.color = "var(--primary)";
-          formClientHint.textContent = "💡 已切换至 Docker 容器模式：将直接直连容器内部，宿主机与其它容器 100% 保持直连不受影响。";
+          formClientHint.textContent = "💡 容器有 SSH 服务时填写映射端口；通过宿主机管理时请选择 Docker 穿透模式。";
         }
       } else if (os === "linux") {
         if (formClientPort && formClientPort.value === "6600") {
@@ -1426,8 +1365,9 @@ with ProxySession():
             if (sectionAccessSsh) sectionAccessSsh.style.display = "none";
             if (sectionAccessDockerHost) sectionAccessDockerHost.style.display = "block";
             if (formClientContainer) formClientContainer.value = target.container_name || "";
+            formClientHostPort.value = target.port || 22;
             if (formClientSshHost) formClientSshHost.value = target.ssh_host || target.host || "";
-            if (formClientSshUserHost) formClientSshUserHost.value = target.ssh_user || "zxy";
+            if (formClientSshUserHost) formClientSshUserHost.value = target.ssh_user || "ubuntu";
           } else {
             if (sectionAccessSsh) sectionAccessSsh.style.display = "block";
             if (sectionAccessDockerHost) sectionAccessDockerHost.style.display = "none";
@@ -1459,8 +1399,9 @@ with ProxySession():
       if (formClientSshPass) formClientSshPass.value = "";
       if (formClientSshUser) formClientSshUser.value = "root";
       if (formClientContainer) formClientContainer.value = "";
+      formClientHostPort.value = 22;
       if (formClientSshHost) formClientSshHost.value = "";
-      if (formClientSshUserHost) formClientSshUserHost.value = "zxy";
+      if (formClientSshUserHost) formClientSshUserHost.value = "ubuntu";
       formClientTags.value = "";
       formClientDesc.value = "";
     } else {
@@ -1482,8 +1423,9 @@ with ProxySession():
         if (sectionAccessSsh) sectionAccessSsh.style.display = "none";
         if (sectionAccessDockerHost) sectionAccessDockerHost.style.display = "block";
         if (formClientContainer) formClientContainer.value = target.container_name || "";
+        formClientHostPort.value = target.port || 22;
         if (formClientSshHost) formClientSshHost.value = target.ssh_host || target.host || "";
-        if (formClientSshUserHost) formClientSshUserHost.value = target.ssh_user || "zxy";
+        if (formClientSshUserHost) formClientSshUserHost.value = target.ssh_user || "ubuntu";
       } else {
         if (sectionAccessSsh) sectionAccessSsh.style.display = "block";
         if (sectionAccessDockerHost) sectionAccessDockerHost.style.display = "none";
@@ -1509,11 +1451,11 @@ with ProxySession():
   modalClientTestBtn.addEventListener("click", async () => {
     const accessMode = formClientAccessMode ? formClientAccessMode.value : "ssh";
     const host = formClientHost.value.trim();
-    const port = parseInt((formClientPort ? formClientPort.value.trim() : "22") || "22", 10);
+    const port = Number((accessMode === "docker_host" ? formClientHostPort.value : formClientPort.value) || 22);
     const osType = formClientOs ? formClientOs.value : "linux";
     const authType = formClientAuthType ? formClientAuthType.value : "key";
-    const sshUser = formClientSshUser ? formClientSshUser.value.trim() : "root";
-    const sshPass = formClientSshPass ? formClientSshPass.value.trim() : "";
+    const sshUser = (accessMode === "docker_host" ? formClientSshUserHost.value : formClientSshUser.value).trim();
+    const sshPass = formClientSshPass ? formClientSshPass.value : "";
     const containerName = formClientContainer ? formClientContainer.value.trim() : "";
     const sshHost = formClientSshHost ? formClientSshHost.value.trim() : host;
 
@@ -1555,10 +1497,10 @@ with ProxySession():
       const d = await res.json();
       if (d.success) {
         formClientHint.style.color = "var(--success)";
-        formClientHint.textContent = d.message;
+        formClientHint.textContent = d.message || d.error;
       } else {
         formClientHint.style.color = d.tcp_ok ? "var(--warning)" : "var(--danger)";
-        formClientHint.textContent = d.message;
+        formClientHint.textContent = d.message || d.error;
       }
     } catch (e) {
       formClientHint.style.color = "var(--danger)";
@@ -1576,7 +1518,7 @@ with ProxySession():
     const name = formClientName.value.trim();
     const osType = formClientOs.value;
     const boundGw = formClientGw.value;
-    const tags = formClientTags.value.split(",").map(t => t.strip ? t.strip() : t.trim()).filter(Boolean);
+    const tags = formClientTags.value.split(",").map(t => t.trim()).filter(Boolean);
     const desc = formClientDesc.value.trim();
     const accessMode = formClientAccessMode ? formClientAccessMode.value : "ssh";
 
@@ -1592,7 +1534,8 @@ with ProxySession():
       host = formClientSshHost ? formClientSshHost.value.trim() : "";
       containerName = formClientContainer ? formClientContainer.value.trim() : "";
       sshHost = host;
-      sshUser = formClientSshUserHost ? formClientSshUserHost.value.trim() : "zxy";
+      port = Number(formClientHostPort.value || 22);
+      sshUser = formClientSshUserHost ? formClientSshUserHost.value.trim() : "ubuntu";
       authType = "key";
       if (!name || !host || !containerName) {
         formClientHint.style.color = "var(--danger)";
@@ -1604,7 +1547,7 @@ with ProxySession():
       port = parseInt((formClientPort ? formClientPort.value.trim() : "22") || "22", 10);
       sshUser = formClientSshUser ? formClientSshUser.value.trim() : "root";
       authType = formClientAuthType ? formClientAuthType.value : "key";
-      sshPass = formClientSshPass ? formClientSshPass.value.trim() : "";
+      sshPass = formClientSshPass ? formClientSshPass.value : "";
       if (!name || !host) {
         formClientHint.style.color = "var(--danger)";
         formClientHint.textContent = "❌ 请填写节点名称和主机 IP";
@@ -1784,18 +1727,13 @@ with ProxySession():
         body: JSON.stringify({ host: activeGateway.host, port: activeGateway.port })
       });
       const d = await res.json();
-      if (d.online) {
-        globalStatusPill.querySelector(".status-indicator-dot").className = "status-indicator-dot online";
-        sbGwStatusVal.textContent = "● 连通正常";
-        sbGwStatusVal.className = "m-val green";
-        sbGwRttSub.textContent = `TCP 延迟: ${d.latency_ms} ms`;
-      } else {
-        globalStatusPill.querySelector(".status-indicator-dot").className = "status-indicator-dot offline";
-        sbGwStatusVal.textContent = "● 端口异常";
-        sbGwStatusVal.className = "m-val";
-        sbGwStatusVal.style.color = "var(--danger)";
-        sbGwRttSub.textContent = d.error || "无法连接";
-      }
+      globalStatusPill.querySelector(".status-indicator-dot").className =
+        "status-indicator-dot " + (d.online ? "online" : "offline");
+      sbGwStatusVal.textContent = d.tcp_ok ? "已连接" : "连接失败";
+      sbGwStatusVal.className = d.tcp_ok ? "m-val green" : "m-val";
+      sbGwRttSub.textContent = d.tcp_ok ? "TCP 耗时 " + d.tcp_latency_ms + " ms" : (d.error || "无法连接");
+      sbDiagRateVal.textContent = d.code ? "HTTP " + d.code : (d.tcp_ok ? "请求失败" : "尚未请求");
+      sbDiagSummary.textContent = d.online ? d.url : (d.error || "请检查代理和目标地址");
     } catch (e) {
       console.error(e);
     }

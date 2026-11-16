@@ -5,12 +5,20 @@ Multi-Gateway, Multi-Node Topology, Dynamic CRUD & Progressive Guided Sandbox Ex
 Zero third-party dependencies (pure Python 3 standard library).
 """
 from concurrent.futures import ThreadPoolExecutor
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer as HTTPServer
+from socketserver import TCPServer
+import argparse
+import hashlib
+import hmac
+import http.client
+import ipaddress
 import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
+import threading
 import socket
 import stat
 import subprocess
@@ -24,8 +32,24 @@ import urllib.request
 WEB_DIR = Path(__file__).resolve().parent
 TOOL_DIR = WEB_DIR.parent
 STATIC_DIR = WEB_DIR / "static"
-CONFIG_FILE = TOOL_DIR / "config.json"
-AUDIT_LOG_FILE = TOOL_DIR / "data" / "audit.log"
+if __package__ in (None, ""):
+    sys.path.insert(0, str(TOOL_DIR))
+
+from sdk.config import data_dir, load_config, resolve_gateway_info, save_config
+
+CONFIG_WRITE_LOCK = threading.RLock()
+
+
+class ThreadingHTTPServer(HTTPServer):
+    def server_bind(self):
+        # HTTPServer resolves its own hostname, which can block on reverse DNS
+        # even when binding loopback. The console only needs the numeric address.
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
+def audit_path():
+    return data_dir() / "audit.log"
 
 
 def write_audit_log(action, node_id="-", status="info", details="", operator_ip="127.0.0.1"):
@@ -33,7 +57,7 @@ def write_audit_log(action, node_id="-", status="info", details="", operator_ip=
     Appends an event record to the lightweight audit log in JSON Lines format.
     """
     try:
-        AUDIT_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        audit_path().parent.mkdir(parents=True, exist_ok=True)
         record = {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "action": action,
@@ -42,7 +66,7 @@ def write_audit_log(action, node_id="-", status="info", details="", operator_ip=
             "status": status,
             "details": str(details or "")
         }
-        with open(AUDIT_LOG_FILE, "a", encoding="utf-8") as f:
+        with open(audit_path(), "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception as e:
         print(f"[Audit Log Warning] {e}")
@@ -52,11 +76,11 @@ def get_audit_logs(limit=60):
     """
     Retrieves the most recent audit log entries in reverse chronological order.
     """
-    if not AUDIT_LOG_FILE.exists():
+    if not audit_path().exists():
         return []
     records = []
     try:
-        with open(AUDIT_LOG_FILE, "r", encoding="utf-8") as f:
+        with open(audit_path(), "r", encoding="utf-8") as f:
             lines = f.readlines()
         for line in reversed(lines[-limit:]):
             line = line.strip()
@@ -89,87 +113,6 @@ def is_local_host(host: str) -> bool:
         return False
 
 
-def load_config():
-    default_cfg = {
-        "version": "1.3.0",
-        "active_gateway_id": "gw-default",
-        "gateways": [
-            {
-                "id": "gw-default",
-                "name": "局域网代理工作站",
-                "host": "192.168.1.100",
-                "port": 7890,
-                "protocol": "http",
-                "description": "局域网科学出海网关",
-                "is_default": True
-            }
-        ],
-        "clients": [
-            {
-                "id": "node-linux-server",
-                "name": "Linux 计算工作站 / GPU 服务器",
-                "host": "192.168.1.101",
-                "os_type": "linux",
-                "bound_gateway_id": "gw-default",
-                "tags": ["Linux", "x86_64", "计算节点"],
-                "description": "深度学习计算节点或研发工作站"
-            }
-        ],
-        "web_port": 8899,
-        "no_proxy": "localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,*.local",
-        "diagnostic_targets": {
-            "Google": {"url": "https://www.google.com", "desc": "基础连通", "category": "基础服务"},
-            "GitHub": {"url": "https://github.com", "desc": "源码拉取", "category": "研发必备"},
-            "Raw GitHub": {"url": "https://raw.githubusercontent.com", "desc": "脚本拉取", "category": "研发必备"},
-            "HuggingFace": {"url": "https://huggingface.co", "desc": "AI模型下载", "category": "AI/大模型"},
-            "PyPI": {"url": "https://pypi.org", "desc": "pip 包管理", "category": "包管理"},
-            "OpenAI API": {"url": "https://api.openai.com", "desc": "LLM 接口", "category": "AI/大模型"},
-            "YouTube": {"url": "https://www.youtube.com", "desc": "多媒体传输", "category": "多媒体"}
-        }
-    }
-    # 首次自愈机制: 若 config.json 不存在，自动从 config.example.json 拷贝生成
-    if not CONFIG_FILE.exists():
-        example_cfg = TOOL_DIR / "config.example.json"
-        if example_cfg.exists():
-            try:
-                shutil.copy2(example_cfg, CONFIG_FILE)
-            except Exception:
-                pass
-
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                default_cfg.update(data)
-        except Exception:
-            pass
-    return default_cfg
-
-
-def save_config(cfg_data):
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(cfg_data, f, indent=2, ensure_ascii=False)
-
-
-def resolve_gateway_info(cfg, gateway_id=None):
-    gid = gateway_id or cfg.get("active_gateway_id")
-    for gw in cfg.get("gateways", []):
-        if gw.get("id") == gid:
-            return gw
-    for gw in cfg.get("gateways", []):
-        if gw.get("is_default"):
-            return gw
-    if cfg.get("gateways"):
-        return cfg["gateways"][0]
-    return {
-        "id": "default",
-        "name": "默认网关",
-        "host": "127.0.0.1",
-        "port": 7890,
-        "protocol": "http"
-    }
-
-
 def check_tcp_port(host: str, port: int, timeout: float = 1.5):
     t0 = time.time()
     try:
@@ -190,51 +133,77 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 4
         desc = ""
         category = ""
 
-    t0 = time.time()
+    started = time.monotonic()
+    result = {"name": name, "url": url, "desc": desc, "category": category, "status": "offline"}
+    conn = None
     try:
-        proxy_handler = urllib.request.ProxyHandler({
-            "http": proxy_url,
-            "https": proxy_url
-        })
-        opener = urllib.request.build_opener(proxy_handler)
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "Mozilla/5.0 (net-proxy-tool-diagnostic/3.0)"}
-        )
-        with opener.open(req, timeout=timeout) as resp:
-            code = resp.getcode()
-            rtt_ms = round((time.time() - t0) * 1000, 1)
-            return {
-                "name": name,
-                "url": url,
-                "desc": desc,
-                "category": category,
-                "status": "online",
-                "code": code,
-                "latency_ms": rtt_ms
-            }
-    except urllib.error.HTTPError as e:
-        rtt_ms = round((time.time() - t0) * 1000, 1)
-        return {
-            "name": name,
-            "url": url,
-            "desc": desc,
-            "category": category,
-            "status": "online",
-            "code": e.code,
-            "latency_ms": rtt_ms
-        }
-    except Exception as e:
-        rtt_ms = round((time.time() - t0) * 1000, 1)
-        return {
-            "name": name,
-            "url": url,
-            "desc": desc,
-            "category": category,
-            "status": "offline",
-            "error": str(e),
-            "latency_ms": rtt_ms
-        }
+        target = urllib.parse.urlsplit(url)
+        proxy = urllib.parse.urlsplit(proxy_url)
+        if target.scheme not in ("http", "https") or not target.hostname or target.username or target.password:
+            raise ValueError("目标必须是无凭据的 HTTP 或 HTTPS URL")
+        # Connect to the explicit proxy even for localhost and when NO_PROXY is set.
+        if target.scheme == "https":
+            conn = http.client.HTTPSConnection(proxy.hostname, proxy.port, timeout=timeout)
+            conn.set_tunnel(target.hostname, target.port or 443)
+            path = urllib.parse.urlunsplit(("", "", target.path or "/", target.query, ""))
+        else:
+            conn = http.client.HTTPConnection(proxy.hostname, proxy.port, timeout=timeout)
+            path = urllib.parse.urlunsplit(target._replace(fragment=""))
+        conn.request("GET", path, headers={"Host": target.netloc, "User-Agent": "net-proxy-tool/1.4"})
+        response = conn.getresponse()
+        result["code"] = response.status
+        if 200 <= response.status < 300:
+            result["status"] = "online"
+        else:
+            result["error"] = f"HTTP {response.status} {response.reason}"
+    except (ValueError, OSError, http.client.HTTPException) as exc:
+        result["error"] = str(exc)
+        # http.client reports a rejected HTTPS CONNECT as OSError before getresponse().
+        tunnel = re.match(r"Tunnel connection failed: (\d{3})\b", str(exc))
+        if tunnel:
+            result["code"] = int(tunnel[1])
+    finally:
+        if conn is not None:
+            conn.close()
+    result["latency_ms"] = round((time.monotonic() - started) * 1000, 1)
+    return result
+
+
+def validate_host_port(host, port):
+    if ":" in host:
+        address, sep, zone = host.partition("%")
+        ipaddress.IPv6Address(address)
+        if sep and not re.fullmatch(r"[A-Za-z0-9_.-]+", zone):
+            raise ValueError("无效的 IPv6 区域标识")
+    elif not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", host):
+        raise ValueError("请输入有效的代理主机名或 IP 地址")
+    if not 1 <= int(port) <= 65535:
+        raise ValueError("端口必须在 1 至 65535 之间")
+
+
+def gateway_url(gw):
+    if not gw:
+        raise ValueError("请先添加 HTTP 代理网关")
+    if gw.get("protocol", "http") != "http":
+        raise ValueError("请使用 HTTP 或 mixed 代理监听端口")
+    host, port = gw["host"], int(gw["port"])
+    validate_host_port(host, port)
+    return f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
+
+
+def validate_bypass(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[\w.,*:/%\[\]-]*", value):
+        raise ValueError("直连列表应为以逗号分隔的主机、IP 或网段")
+    return value
+
+
+def public_data(value):
+    if isinstance(value, dict):
+        return {key: public_data(child) for key, child in value.items()
+                if key.lower() not in {"ssh_pass", "password", "token", "api_key", "private_key"}}
+    if isinstance(value, list):
+        return [public_data(child) for child in value]
+    return value
 
 
 def get_control_node_public_key():
@@ -252,6 +221,13 @@ def get_control_node_public_key():
     return None
 
 
+def ssh_with_script(command, script, timeout, env=None):
+    # Remote sh expects LF regardless of the Windows controller's code page.
+    result = subprocess.run(command, input=script.encode("utf-8"), capture_output=True, env=env, timeout=timeout)
+    return subprocess.CompletedProcess(command, result.returncode, result.stdout.decode("utf-8", "replace"),
+                                       result.stderr.decode("utf-8", "replace"))
+
+
 def run_remote_ssh_script(host, port, user, auth_type, password, script, timeout=14):
     """
     Executes a script on a remote workstation, edge board, or container via SSH.
@@ -264,24 +240,31 @@ def run_remote_ssh_script(host, port, user, auth_type, password, script, timeout
     user = user or "root"
     auth_type = (auth_type or ("password" if password else "key")).lower()
 
+    validate_host_port(host, port)
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", user):
+        raise ValueError("无效的 SSH 用户名")
     if password and auth_type == "password":
+        if os.name == "nt":
+            raise ValueError("Windows 控制端请使用 OpenSSH 密钥认证；密码接入可在 Linux 控制端执行")
         with tempfile.NamedTemporaryFile("w", delete=False, suffix=".sh") as tf:
-            tf.write(f"#!/bin/sh\necho '{password}'\n")
+            tf.write('#!/bin/sh\nprintf "%s\\n" "$NET_PROXY_SSH_PASSWORD"\n')
             askpass_path = tf.name
         os.chmod(askpass_path, stat.S_IRWXU)
 
         env = os.environ.copy()
+        env["NET_PROXY_SSH_PASSWORD"] = password
         env["SSH_ASKPASS"] = askpass_path
         env["SSH_ASKPASS_REQUIRE"] = "force"
         env["DISPLAY"] = "dummy"
 
         try:
-            pubkey = get_control_node_public_key()
+            pubkey = get_control_node_public_key() if script.startswith("action=on\n") else None
             if pubkey:
+                pubkey = shlex.quote(pubkey)
                 enroll_cmd = (
                     f"mkdir -p ~/.ssh && chmod 700 ~/.ssh && "
-                    f"grep -qF '{pubkey}' ~/.ssh/authorized_keys 2>/dev/null || "
-                    f"echo '{pubkey}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+                    f"grep -qFx -- {pubkey} ~/.ssh/authorized_keys 2>/dev/null || "
+                    f"printf '%s\\n' {pubkey} >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
                 )
                 full_script = f"{enroll_cmd}\n{script}"
             else:
@@ -290,21 +273,12 @@ def run_remote_ssh_script(host, port, user, auth_type, password, script, timeout
             ssh_bin = ["setsid", "ssh"] if sys.platform != "win32" and shutil.which("setsid") else ["ssh"]
             cmd = ssh_bin + [
                 "-p", str(port),
-                "-o", "StrictHostKeyChecking=no",
+                "-o", "StrictHostKeyChecking=accept-new",
                 "-o", "ConnectTimeout=5",
                 f"{user}@{host}",
                 "sh"
             ]
-            res = subprocess.run(
-                cmd,
-                input=full_script,
-                capture_output=True,
-                text=True,
-                errors="replace",
-                env=env,
-                timeout=timeout
-            )
-            return res
+            return ssh_with_script(cmd, full_script, timeout, env)
         finally:
             try:
                 os.remove(askpass_path)
@@ -315,117 +289,53 @@ def run_remote_ssh_script(host, port, user, auth_type, password, script, timeout
             "ssh",
             "-p", str(port),
             "-o", "BatchMode=yes",
-            "-o", "StrictHostKeyChecking=no",
+            "-o", "StrictHostKeyChecking=accept-new",
             "-o", "ConnectTimeout=5",
             f"{user}@{host}",
             "sh"
         ]
-        res = subprocess.run(
-            cmd,
-            input=script,
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=timeout
-        )
-        return res
+        return ssh_with_script(cmd, script, timeout)
 
 
 def generate_provisioning_script(proxy_url, no_proxy, action="on"):
-    """
-    Generates unified provisioning script for both non-root workstations and root containers.
-    """
-    if action == "on":
-        return f"""
-# Layer 1: Dedicated Tool Configurations (Immediate across all sessions including active tmux)
-mkdir -p ~/.config/pip
-cat << 'EOF' > ~/.curlrc
-proxy = "{proxy_url}"
-noproxy = "{no_proxy}"
-EOF
+    """Deploy a POSIX script with per-file snapshots and conflict detection."""
+    if action not in ("on", "off"):
+        raise ValueError("Invalid switch action")
+    template = (WEB_DIR / "provision.sh").read_text(encoding="utf-8")
+    return "action={}\nproxy={}\nbypass={}\n".format(
+        action, shlex.quote(proxy_url), shlex.quote(validate_bypass(no_proxy))) + template
 
-git config --global http.proxy "{proxy_url}" 2>/dev/null || true
-git config --global https.proxy "{proxy_url}" 2>/dev/null || true
 
-cat << 'EOF' > ~/.config/pip/pip.conf
-[global]
-proxy = {proxy_url}
-EOF
+def validate_ssh_destination(host, user, container=None):
+    validate_host_port(host, 22)
+    if not re.fullmatch(r"[a-zA-Z0-9_][a-zA-Z0-9_.-]*", user):
+        raise ValueError("无效的 SSH 用户名")
+    if container is not None and not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", container):
+        raise ValueError("无效的 Docker 容器名称")
 
-cat << 'EOF' > ~/.wgetrc
-http_proxy = {proxy_url}
-https_proxy = {proxy_url}
-EOF
 
-# Try system-wide configs if root or passwordless sudo available (ignore errors if standard user)
-if [ "$(id -u)" = "0" ]; then
-    cp ~/.curlrc /etc/curlrc 2>/dev/null || true
-    mkdir -p /etc/pip /etc/apt/apt.conf.d 2>/dev/null || true
-    cp ~/.config/pip/pip.conf /etc/pip.conf 2>/dev/null || true
-    git config --system http.proxy "{proxy_url}" 2>/dev/null || true
-    cat << 'EOF' > /etc/apt/apt.conf.d/99net-proxy
-Acquire::http::Proxy "{proxy_url}";
-Acquire::https::Proxy "{proxy_url}";
-EOF
-elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-    sudo -n cp ~/.curlrc /etc/curlrc 2>/dev/null || true
-    sudo -n mkdir -p /etc/pip /etc/apt/apt.conf.d 2>/dev/null || true
-    sudo -n cp ~/.config/pip/pip.conf /etc/pip.conf 2>/dev/null || true
-    sudo -n git config --system http.proxy "{proxy_url}" 2>/dev/null || true
-fi
+def docker_ssh_command(target, *command):
+    host = target.get("ssh_host") or target.get("host") or "127.0.0.1"
+    user = target.get("ssh_user") or "ubuntu"
+    name = target.get("container_name") or target.get("name") or ""
+    port = int(target.get("port") or 22)
+    validate_host_port(host, port)
+    validate_ssh_destination(host, user, name)
+    remote = ["docker", *command, name]
+    if command[0] == "exec":
+        remote.append("sh")
+    # OpenSSH passes the remote command to a shell, even when invoked with argv.
+    return ["ssh", "-p", str(port), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "ConnectTimeout=5", f"{user}@{host}", " ".join(map(shlex.quote, remote))]
 
-# Layer 2: Prepend Environment Variables at Line 1 of bashrc (Bypass [ -z "$PS1" ] && return)
-PREPEND_CODE='
-# --- NET-PROXY-TOOL-START ---
-export HTTP_PROXY="{proxy_url}"
-export HTTPS_PROXY="{proxy_url}"
-export http_proxy="{proxy_url}"
-export https_proxy="{proxy_url}"
-export NO_PROXY="{no_proxy}"
-export no_proxy="{no_proxy}"
-# --- NET-PROXY-TOOL-END ---
-'
 
-for f in ~/.bashrc ~/.bash_profile ~/.profile /etc/bash.bashrc /etc/profile; do
-  if [ -f "$f" ] && [ -w "$f" ]; then
-    sed -i '/# --- NET-PROXY-TOOL-START ---/,/# --- NET-PROXY-TOOL-END ---/d' "$f" 2>/dev/null || true
-    printf "%s\\n%s" "$PREPEND_CODE" "$(cat "$f")" > "$f" 2>/dev/null || true
-  fi
-done
-
-cat << 'EOF' > ~/.net-proxy-switch.sh
-export HTTP_PROXY="{proxy_url}"
-export HTTPS_PROXY="{proxy_url}"
-export http_proxy="{proxy_url}"
-export https_proxy="{proxy_url}"
-export NO_PROXY="{no_proxy}"
-export no_proxy="{no_proxy}"
-EOF
-"""
+def validate_client(target):
+    validate_host_port(target["host"], target.get("port", 22))
+    if target.get("access_mode") == "docker_host":
+        validate_ssh_destination(target.get("ssh_host") or target["host"], target.get("ssh_user") or "ubuntu",
+                                 target.get("container_name") or "")
     else:
-        return """
-# Clean up user tool configurations
-rm -f ~/.curlrc ~/.config/pip/pip.conf ~/.wgetrc ~/.net-proxy-switch.sh
-git config --global --unset http.proxy 2>/dev/null || true
-git config --global --unset https.proxy 2>/dev/null || true
-
-# Clean up system-wide configs if permitted
-if [ "$(id -u)" = "0" ]; then
-    rm -f /etc/curlrc /etc/pip.conf /etc/apt/apt.conf.d/99net-proxy
-    git config --system --unset http.proxy 2>/dev/null || true
-    git config --system --unset https.proxy 2>/dev/null || true
-elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-    sudo -n rm -f /etc/curlrc /etc/pip.conf /etc/apt/apt.conf.d/99net-proxy 2>/dev/null || true
-    sudo -n git config --system --unset http.proxy 2>/dev/null || true
-fi
-
-# Clean up environment prepend blocks
-for f in ~/.bashrc ~/.bash_profile ~/.profile /etc/bash.bashrc /etc/profile; do
-  if [ -f "$f" ] && [ -w "$f" ]; then
-    sed -i '/# --- NET-PROXY-TOOL-START ---/,/# --- NET-PROXY-TOOL-END ---/d' "$f" 2>/dev/null || true
-  fi
-done
-"""
+        validate_ssh_destination(target["host"], target.get("ssh_user") or "root")
 
 
 def apply_node_proxy(target, action, cfg):
@@ -439,27 +349,16 @@ def apply_node_proxy(target, action, cfg):
     os_type = (target.get("os_type") or "linux").lower()
     access_mode = (target.get("access_mode") or ("docker_host" if target.get("container_name") and not target.get("port") else "ssh")).lower()
     gw = resolve_gateway_info(cfg, target.get("bound_gateway_id"))
-    proxy_url = f"http://{gw['host']}:{gw['port']}"
+    proxy_url = gateway_url(gw) if action == "on" else ""
     no_proxy = cfg.get("no_proxy", "localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,*.local")
 
     result = {"action": action, "node_id": target.get("id"), "os_type": os_type, "access_mode": access_mode}
 
     # 1. 宿主机 Docker 穿透通道 (Legacy / Specific for containers without SSH)
     if access_mode == "docker_host":
-        cname = target.get("container_name") or target.get("name") or "app-container"
-        ssh_host = target.get("ssh_host") or target.get("host") or "127.0.0.1"
-        ssh_user = target.get("ssh_user") or "ubuntu"
         script = generate_provisioning_script(proxy_url, no_proxy, action)
         try:
-            res = subprocess.run(
-                ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5",
-                 f"{ssh_user}@{ssh_host}", "docker", "exec", "-i", "-u", "0", cname, "sh"],
-                input=script,
-                capture_output=True,
-                text=True,
-                errors="replace",
-                timeout=12
-            )
+            res = ssh_with_script(docker_ssh_command(target, "exec", "-i", "-u", "0"), script, 12)
             result["returncode"] = res.returncode
             if res.returncode != 0:
                 result["stderr"] = res.stderr.strip()
@@ -469,14 +368,16 @@ def apply_node_proxy(target, action, cfg):
 
     # 2. 本地 Linux 节点 (动态检测当前服务器本机)
     if is_local_host(target.get("host")) and int(target.get("port") or 22) == 22 and not target.get("container_name"):
+        if sys.platform == "win32" or os_type == "windows":
+            return dict(result, error="Windows 本机请使用单命令或 PowerShell 会话代理")
         script = generate_provisioning_script(proxy_url, no_proxy, action)
         try:
-            res = subprocess.run(["bash", "-c", script], capture_output=True, text=True, errors="replace", timeout=10)
-            result["local_returncode"] = res.returncode
+            res = subprocess.run(["sh", "-c", script], capture_output=True, text=True, errors="replace", timeout=10)
+            result["returncode"] = res.returncode
             if res.returncode != 0:
-                result["local_stderr"] = res.stderr.strip()
+                result["stderr"] = res.stderr.strip()
         except Exception as e:
-            result["local_error"] = str(e)
+            result["error"] = str(e)
         return result
 
     # 3. 通用远程 SSH 直连通道 (物理工作站 / 工控机 / 边缘设备 / 暴露端口的 Docker 容器)
@@ -494,28 +395,46 @@ def apply_node_proxy(target, action, cfg):
             result["stderr"] = res.stderr.strip()
         else:
             # If initial connection with password succeeded, upgrade node to key auth
-            if password and auth_type == "password":
+            if action == "on" and password and auth_type == "password" and get_control_node_public_key():
+                probe = run_remote_ssh_script(host, port, user, "key", None, "true", timeout=8)
+                if probe.returncode != 0:
+                    return result
+                target.pop("ssh_pass", None)
                 target["auth_type"] = "key"
                 target["has_ssh_key"] = True
-                save_config(cfg)
     except Exception as e:
         result["error"] = str(e)
 
     return result
 
 
-def ensure_node_provisioning_state(cfg):
-    """
-    Reconciles physical node files on disk/docker with config.json states.
-    Ensures self-healing when web server starts or reloads.
-    """
-    for client in cfg.get("clients", []):
-        is_enabled = bool(client.get("is_proxy_enabled"))
-        action = "on" if is_enabled else "off"
-        try:
-            apply_node_proxy(client, action, cfg)
-        except Exception as e:
-            print(f"[Warning] Failed to reconcile proxy state for {client.get('id')}: {e}")
+def check_node_http(target):
+    mode = target.get("access_mode") or ("docker_host" if target.get("container_name") and not target.get("port") else "ssh")
+    started = time.monotonic()
+    result = {"online": False, "latency_ms": None, "is_proxy_enabled": bool(target.get("is_proxy_enabled"))}
+    try:
+        local = (mode != "docker_host" and is_local_host(target.get("host"))
+                 and int(target.get("port") or 22) == 22 and not target.get("container_name"))
+        # Use only the final status, not CONNECT headers or numbers in an HTTP body.
+        command = ["curl", "-sS", "-o", os.devnull if local else "/dev/null", "-w", "%{http_code}",
+                   "--max-time", "8", "https://www.google.com"]
+        if local:
+            res = subprocess.run(command, capture_output=True, text=True, errors="replace", timeout=10)
+        else:
+            script = " ".join(map(shlex.quote, command))
+            if mode == "docker_host":
+                res = ssh_with_script(docker_ssh_command(target, "exec", "-i"), script, 14)
+            else:
+                user = target.get("ssh_user") or ("root" if target.get("os_type") == "docker" else "ubuntu")
+                res = run_remote_ssh_script(target["host"], target.get("port"), user,
+                                            target.get("auth_type"), target.get("ssh_pass"), script, timeout=14)
+        code = res.stdout.strip()
+        result["online"] = res.returncode == 0 and bool(re.fullmatch(r"2[0-9]{2}", code))
+        result["status_line"] = ("HTTP " + code) if res.returncode == 0 else (res.stderr.strip() or "请求失败")
+        result["latency_ms"] = round((time.monotonic() - started) * 1000, 1)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        result.update(error=str(exc), status_line=str(exc))
+    return result
 
 
 DANGEROUS_PATTERNS = [
@@ -538,14 +457,15 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0")
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         super().end_headers()
 
     def send_json(self, data, status_code=200):
-        payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        payload = json.dumps(public_data(data), ensure_ascii=False).encode("utf-8")
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -554,7 +474,6 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         self.send_response(status_code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -562,10 +481,45 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length <= 0:
             return {}
+        if content_length > 1024 * 1024:
+            self.close_connection = True
+            raise ValueError("请求体过大")
         post_data = self.rfile.read(content_length).decode("utf-8")
-        return json.loads(post_data)
+        data = json.loads(post_data)
+        if not isinstance(data, dict):
+            raise ValueError("请求体必须是 JSON 对象")
+        return data
+
+    def parse_request(self):
+        if not super().parse_request():
+            return False
+        host = self.headers.get("Host", "")
+        try:
+            parsed = urllib.parse.urlsplit("//" + host)
+            if parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
+                raise ValueError()
+            allowed = {"localhost", "127.0.0.1", "::1", self.connection.getsockname()[0]}
+            # A published container port can be forwarded from a different local IP.
+            if parsed.hostname not in allowed:
+                raise ValueError()
+            origin = self.headers.get("Origin")
+            if origin and origin.lower() not in ("http://" + host.lower(), "https://" + host.lower()):
+                raise ValueError()
+            if self.headers.get("Sec-Fetch-Site") == "cross-site":
+                raise ValueError()
+        except ValueError:
+            self.close_connection = True
+            self.send_error(403, "Untrusted Host or Origin")
+            return False
+        return True
 
     def do_GET(self):
+        try:
+            self.serve_get()
+        except ValueError as exc:
+            self.send_json({"success": False, "error": str(exc)}, 400)
+
+    def serve_get(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
@@ -576,8 +530,8 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         if path == "/proxy-on":
             cfg = load_config()
             gw = resolve_gateway_info(cfg)
-            proxy_url = f"http://{gw['host']}:{gw['port']}"
-            no_proxy = cfg.get("no_proxy", "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.local")
+            proxy_url = gateway_url(gw)
+            no_proxy = validate_bypass(cfg.get("no_proxy", "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.local"))
             script = f"""# Generated by net-proxy-tool
 export HTTP_PROXY="{proxy_url}"
 export HTTPS_PROXY="{proxy_url}"
@@ -593,7 +547,7 @@ echo "[net-proxy-tool] 出海代理已开启 (出网网关: {gw['host']}:{gw['po
         if path == "/proxy-off":
             script = """# Generated by net-proxy-tool
 unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy
-echo "[net-proxy-tool] 出海代理已关闭，当前会话已恢复 100% 直连"
+echo "[net-proxy-tool] 已清除当前会话的 HTTP 代理变量"
 """
             self.send_text(script)
             return
@@ -601,8 +555,8 @@ echo "[net-proxy-tool] 出海代理已关闭，当前会话已恢复 100% 直连
         if path == "/container-init.sh":
             cfg = load_config()
             gw = resolve_gateway_info(cfg)
-            proxy_url = f"http://{gw['host']}:{gw['port']}"
-            no_proxy = cfg.get("no_proxy", "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.local")
+            proxy_url = gateway_url(gw)
+            no_proxy = validate_bypass(cfg.get("no_proxy", "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.local"))
             script = f"""#!/bin/bash
 # net-proxy-tool: Docker 容器内独立开关一键初始化
 # 纯容器内生效，绝不影响宿主机和其他容器
@@ -645,6 +599,12 @@ echo "=================================================="
             self.send_text(script)
             return
 
+        if path == "/api/health":
+            token = os.environ.get("NET_PROXY_INSTANCE_TOKEN", "")
+            self.send_json({"status": "ok", "version": "1.4.0", "service": "net-proxy-tool",
+                            "pid": os.getpid(), "instance_id": hashlib.sha256(token.encode()).hexdigest() if token else ""})
+            return
+
         if path == "/api/config":
             self.send_json(load_config())
             return
@@ -665,6 +625,7 @@ echo "=================================================="
 
         handlers = {
             "/api/config": self.handle_save_config,
+            "/api/shutdown": self.handle_shutdown,
             "/api/set-active-gateway": self.handle_set_active_gateway,
             "/api/test-gateway": self.handle_test_gateway,
             "/api/test-host": self.handle_test_host,
@@ -684,12 +645,29 @@ echo "=================================================="
 
         if path in handlers:
             try:
-                handlers[path]()
+                # Serialize read-modify-write updates, including switch results.
+                if path in ("/api/config", "/api/set-active-gateway", "/api/node-switch", "/api/nodes/batch-switch") or path.startswith(("/api/clients/", "/api/gateways/")):
+                    with CONFIG_WRITE_LOCK:
+                        handlers[path]()
+                else:
+                    handlers[path]()
+            except (ValueError, KeyError, TypeError) as e:
+                self.send_json({"success": False, "error": str(e)}, status_code=400)
             except Exception as e:
                 self.send_json({"success": False, "error": str(e)}, status_code=500)
             return
 
         self.send_error(404, "Not Found")
+
+    def handle_shutdown(self):
+        self.read_json_body()
+        expected = os.environ.get("NET_PROXY_INSTANCE_TOKEN")
+        supplied = self.headers.get("X-Net-Proxy-Token", "")
+        if not ipaddress.ip_address(self.client_address[0]).is_loopback or not expected or not hmac.compare_digest(supplied, expected):
+            self.send_json({"success": False, "error": "Instance token required"}, 403)
+            return
+        self.send_json({"success": True})
+        threading.Thread(target=self.server.shutdown, daemon=True).start()
 
     def handle_api_status(self, query_string):
         query = urllib.parse.parse_qs(query_string)
@@ -697,8 +675,12 @@ echo "=================================================="
 
         cfg = load_config()
         gw = resolve_gateway_info(cfg, gid)
+        if not gw:
+            self.send_json({"gateway": None, "targets": [], "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "error": "未找到网关，请先在首页保存 HTTP 代理网关。"}, 404 if gid else 200)
+            return
         host, port = gw["host"], int(gw["port"])
-        proxy_url = f"http://{host}:{port}"
+        proxy_url = gateway_url(gw)
 
         gw_ok, gw_rtt = check_tcp_port(host, port)
         results = {
@@ -730,7 +712,9 @@ echo "=================================================="
     def handle_save_config(self):
         req_json = self.read_json_body()
         cfg = load_config()
-        cfg.update(req_json)
+        if set(req_json) != {"no_proxy"}:
+            raise ValueError("此接口只接受 no_proxy")
+        cfg["no_proxy"] = validate_bypass(req_json["no_proxy"])
         save_config(cfg)
         self.send_json({"success": True, "message": "配置保存成功", "config": cfg})
 
@@ -738,6 +722,8 @@ echo "=================================================="
         req_json = self.read_json_body()
         gid = req_json.get("gateway_id")
         cfg = load_config()
+        if not any(g.get("id") == gid for g in cfg.get("gateways", [])):
+            raise ValueError("网关不存在")
         cfg["active_gateway_id"] = gid
         # Update is_default property in gateways list
         for g in cfg.get("gateways", []):
@@ -749,14 +735,15 @@ echo "=================================================="
         req_json = self.read_json_body()
         host = req_json.get("host", "").strip()
         port = int(req_json.get("port", 0))
-        if not host or not port:
-            self.send_json({"success": False, "error": "Host and port required"}, status_code=400)
+        proxy = gateway_url({"host": host, "port": port, "protocol": req_json.get("protocol", "http")})
+        ok, tcp_info = check_tcp_port(host, port, timeout=2.5)
+        url = req_json.get("target_url") or "https://example.com/"
+        if not ok:
+            self.send_json({"success": False, "tcp_ok": False, "online": False, "error": tcp_info})
             return
-        ok, rtt_or_err = check_tcp_port(host, port, timeout=2.5)
-        if ok:
-            self.send_json({"success": True, "online": True, "latency_ms": rtt_or_err})
-        else:
-            self.send_json({"success": True, "online": False, "error": str(rtt_or_err)})
+        result = check_http_target("HTTP probe", url, proxy)
+        online = result["status"] == "online"
+        self.send_json(dict(result, success=online, tcp_ok=True, online=online, tcp_latency_ms=tcp_info))
 
     def handle_test_host(self):
         req_json = self.read_json_body()
@@ -781,21 +768,23 @@ echo "=================================================="
         access_mode = req_json.get("access_mode", "ssh").strip().lower()
         auth_type = req_json.get("auth_type", "key").strip().lower()
         user = req_json.get("ssh_user", "").strip() or "root"
-        password = req_json.get("ssh_pass", "").strip()
+        password = req_json.get("ssh_pass", "")
         container_name = req_json.get("container_name", "").strip()
         ssh_host = req_json.get("ssh_host", "").strip() or host
 
         if access_mode == "docker_host":
-            ok, rtt_or_err = check_tcp_port(ssh_host, 22, timeout=2.5)
+            validate_host_port(ssh_host, port)
+            validate_ssh_destination(ssh_host, user, container_name)
+            ok, rtt_or_err = check_tcp_port(ssh_host, port, timeout=2.5)
             if not ok:
                 self.send_json({
                     "success": False,
                     "tcp_ok": False,
-                    "message": f"❌ 宿主机网络不可达 ({ssh_host}:22): {rtt_or_err}"
+                    "message": f"❌ 宿主机网络不可达 ({ssh_host}:{port}): {rtt_or_err}"
                 })
                 return
             try:
-                cmd = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=4", f"{user}@{ssh_host}", f"docker inspect -f '{{{{.State.Running}}}}' {container_name}"]
+                cmd = docker_ssh_command(dict(req_json, ssh_host=ssh_host, ssh_user=user), "inspect", "-f", "{{.State.Running}}")
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=6)
                 if res.returncode == 0 and "true" in res.stdout.lower():
                     self.send_json({
@@ -806,12 +795,17 @@ echo "=================================================="
                         "message": f"🟢 宿主机已连通 ({rtt_or_err}ms)，且 Docker 容器【{container_name}】正在健康运行中！"
                     })
                 else:
+                    detail = res.stderr.strip().splitlines()[-1:] if res.stderr else []
+                    if res.returncode == 255:
+                        reason = "SSH 连接或密钥认证失败"
+                    elif res.returncode:
+                        reason = "无法检查容器，请核对名称及远程账号的 Docker 权限"
+                    else:
+                        reason = "目标容器已停止"
                     self.send_json({
-                        "success": False,
-                        "tcp_ok": True,
-                        "latency_ms": rtt_or_err,
-                        "auth_ok": False,
-                        "message": f"⚠️ 宿主机已连通，但未检测到运行中的容器【{container_name}】"
+                        "success": False, "tcp_ok": True, "latency_ms": rtt_or_err,
+                        "auth_ok": res.returncode != 255, "container_running": False,
+                        "message": reason + (" · " + detail[0][:300] if detail else ""),
                     })
             except Exception as e:
                 self.send_json({"success": False, "tcp_ok": True, "message": f"⚠️ 容器探测异常: {e}"})
@@ -823,11 +817,10 @@ echo "=================================================="
 
         # 1. TCP Connect
         t0 = time.time()
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(3.0)
+        validate_host_port(host, port)
+        validate_ssh_destination(host, user)
         try:
-            sock.connect((host, port))
-            tcp_ok = True
+            sock = socket.create_connection((host, port), timeout=3.0)
             rtt_ms = round((time.time() - t0) * 1000, 1)
         except Exception as e:
             self.send_json({
@@ -859,7 +852,7 @@ echo "=================================================="
                 res = run_remote_ssh_script(host, port, user, "password", password, "true", timeout=6)
                 if res.returncode == 0:
                     auth_ok = True
-                    auth_msg = "密码鉴权验证通过 (自愈公钥植入就绪)"
+                    auth_msg = "密码认证成功，预检已完成"
                 else:
                     auth_msg = f"初始密码错误或被拒: {res.stderr.strip() or 'Permission denied'}"
             else:
@@ -895,7 +888,7 @@ echo "=================================================="
         name = req_json.get("name", "").strip()
         host = req_json.get("host", "").strip()
         os_type = req_json.get("os_type", "linux").strip().lower()
-        bound_gw = req_json.get("bound_gateway_id", "gw-183").strip()
+        bound_gw = req_json.get("bound_gateway_id", "").strip()
         tags = req_json.get("tags", [])
         desc = req_json.get("description", "").strip()
 
@@ -933,12 +926,13 @@ echo "=================================================="
         if "ssh_user" in req_json and req_json["ssh_user"]:
             new_client["ssh_user"] = req_json["ssh_user"].strip()
         if "ssh_pass" in req_json and req_json["ssh_pass"]:
-            new_client["ssh_pass"] = req_json["ssh_pass"].strip()
+            new_client["ssh_pass"] = req_json["ssh_pass"]
         if "container_name" in req_json:
             new_client["container_name"] = req_json["container_name"].strip()
         if "ssh_host" in req_json:
             new_client["ssh_host"] = req_json["ssh_host"].strip()
 
+        validate_client(new_client)
         clients.append(new_client)
         cfg["clients"] = clients
         save_config(cfg)
@@ -971,7 +965,7 @@ echo "=================================================="
         if "access_mode" in req_json: target["access_mode"] = req_json["access_mode"].strip().lower()
         if "auth_type" in req_json: target["auth_type"] = req_json["auth_type"].strip().lower()
         if "ssh_user" in req_json: target["ssh_user"] = req_json["ssh_user"].strip()
-        if "ssh_pass" in req_json: target["ssh_pass"] = req_json["ssh_pass"].strip()
+        if req_json.get("ssh_pass"): target["ssh_pass"] = req_json["ssh_pass"]
         if "bound_gateway_id" in req_json: target["bound_gateway_id"] = req_json["bound_gateway_id"].strip()
         if "container_name" in req_json: target["container_name"] = req_json["container_name"].strip()
         if "ssh_host" in req_json: target["ssh_host"] = req_json["ssh_host"].strip()
@@ -981,6 +975,7 @@ echo "=================================================="
             target["tags"] = t if isinstance(t, list) else [x.strip() for x in str(t).split(",") if x.strip()]
         if "description" in req_json: target["description"] = req_json["description"].strip()
 
+        validate_client(target)
         save_config(cfg)
         write_audit_log("client_update", cid, "success", f"更新节点: {target['name']}")
         self.send_json({"success": True, "message": "业务节点更新成功", "client": target})
@@ -1023,16 +1018,23 @@ echo "=================================================="
             return
 
         gw = resolve_gateway_info(cfg, target.get("bound_gateway_id"))
+        if action not in ("on", "off"):
+            raise ValueError("无效的节点操作")
         dispatch_result = apply_node_proxy(target, action, cfg)
 
+        if dispatch_result.get("returncode") != 0:
+            detail = dispatch_result.get("error") or dispatch_result.get("stderr") or "下发失败"
+            write_audit_log(f"node_switch_{action}", node_id, "failed", detail)
+            self.send_json({"success": False, "action": action, "error": detail, "message": detail}, 502)
+            return
         # 更新节点配置状态
         target["is_proxy_enabled"] = (action == "on")
         save_config(cfg)
 
         msg = (
-            f"✅ 节点【{target['name']}】出海通道已激活！全栈专有工具（curl/git/pip/wget/apt）与环境变量已即刻生效，在任何终端（包括已有运行中的会话）直接执行命令即可出海。"
+            f"✅ 节点【{target['name']}】已应用代理配置。请在目标终端验证请求结果。"
             if action == "on"
-            else f"🛑 节点【{target['name']}】出海通道已关闭，所有工具配置文件与环境已彻底清除，已恢复 100% 原生直连网络。"
+            else f"🛑 节点【{target['name']}】已关闭托管代理。存在快照的配置已恢复。"
         )
 
         status_flag = "success" if dispatch_result.get("returncode", 0) == 0 else "failed"
@@ -1043,7 +1045,7 @@ echo "=================================================="
             "action": action,
             "node_id": node_id,
             "is_proxy_enabled": target["is_proxy_enabled"],
-            "gateway": f"{gw['host']}:{gw['port']}",
+            "gateway": f"{gw['host']}:{gw['port']}" if gw else None,
             "dispatch_result": dispatch_result,
             "message": msg
         })
@@ -1055,7 +1057,7 @@ echo "=================================================="
         req_json = self.read_json_body()
         action = req_json.get("action", "off").strip().lower()
         if action not in ("on", "off"):
-            action = "off"
+            raise ValueError("无效的节点操作")
 
         cfg = load_config()
         clients = cfg.get("clients", [])
@@ -1065,14 +1067,15 @@ echo "=================================================="
             cid = target.get("id")
             try:
                 res = apply_node_proxy(target, action, cfg)
-                target["is_proxy_enabled"] = (action == "on")
-                ok = (res.get("returncode", 0) == 0)
+                ok = res.get("returncode") == 0
+                if ok:
+                    target["is_proxy_enabled"] = (action == "on")
                 results.append({
                     "node_id": cid,
                     "name": target.get("name"),
                     "success": ok,
                     "action": action,
-                    "error": res.get("stderr")
+                    "error": res.get("error") or res.get("stderr")
                 })
                 write_audit_log(f"batch_{action}", cid, "success" if ok else "failed", res.get("stderr", ""))
             except Exception as e:
@@ -1090,12 +1093,12 @@ echo "=================================================="
         total_count = len(results)
 
         msg = (
-            f"🛑 已成功恢复全部 {success_count}/{total_count} 个节点直连！"
+            f"🛑 已完成 {success_count}/{total_count} 个节点的关闭操作。"
             if action == "off"
-            else f"⚡ 已成功为 {success_count}/{total_count} 个节点开启出海通道！"
+            else f"⚡ 已完成 {success_count}/{total_count} 个节点的启用操作。"
         )
         self.send_json({
-            "success": True,
+            "success": success_count == total_count,
             "action": action,
             "total": total_count,
             "success_count": success_count,
@@ -1112,47 +1115,7 @@ echo "=================================================="
         health_map = {}
 
         def check_one(target):
-            cid = target.get("id")
-            t0 = time.time()
-            test_cmd = "curl -I --connect-timeout 6 https://www.google.com | head -n 2"
-            os_type = (target.get("os_type") or "linux").lower()
-            access_mode = (target.get("access_mode") or ("docker_host" if target.get("container_name") and not target.get("port") else "ssh")).lower()
-
-            try:
-                if access_mode == "docker_host":
-                    cname = target.get("container_name") or target.get("name") or "app-container"
-                    ssh_host = target.get("ssh_host") or target.get("host") or "127.0.0.1"
-                    ssh_user = target.get("ssh_user") or "ubuntu"
-                    res = subprocess.run(
-                        ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=4", f"{ssh_user}@{ssh_host}", "docker", "exec", "-i", cname, "sh"],
-                        input=test_cmd, capture_output=True, text=True, errors="replace", timeout=10
-                    )
-                elif is_local_host(target.get("host")) and int(target.get("port") or 22) == 22 and not target.get("container_name"):
-                    res = subprocess.run(["curl", "-I", "--connect-timeout", "6", "https://www.google.com"], capture_output=True, text=True, errors="replace", timeout=10)
-                else:
-                    host = target.get("host")
-                    port = int(target.get("port") or 22)
-                    user = target.get("ssh_user") or ("root" if os_type == "docker" else "ubuntu")
-                    auth_type = target.get("auth_type") or ("password" if target.get("ssh_pass") else "key")
-                    password = target.get("ssh_pass")
-                    res = run_remote_ssh_script(host, port, user, auth_type, password, test_cmd, timeout=10)
-
-                rtt = round((time.time() - t0) * 1000, 1)
-                is_online = (res.returncode == 0 and any(code in res.stdout for code in ("200", "301", "302")))
-                status_line = res.stdout.strip().split("\n")[0] if res.stdout.strip() else ("HTTP 200 OK" if is_online else "直连超时或未通外网")
-                return cid, {
-                    "online": is_online,
-                    "latency_ms": rtt if is_online else None,
-                    "status_line": status_line,
-                    "is_proxy_enabled": target.get("is_proxy_enabled", False)
-                }
-            except Exception as e:
-                return cid, {
-                    "online": False,
-                    "latency_ms": None,
-                    "status_line": str(e),
-                    "is_proxy_enabled": target.get("is_proxy_enabled", False)
-                }
+            return target.get("id"), check_node_http(target)
 
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_results = list(executor.map(check_one, clients))
@@ -1182,85 +1145,9 @@ echo "=================================================="
             self.send_json({"success": False, "error": f"未找到ID为 '{node_id}' 的节点"}, status_code=404)
             return
 
-        os_type = (target.get("os_type") or "linux").lower()
-        access_mode = (target.get("access_mode") or ("docker_host" if target.get("container_name") and not target.get("port") else "ssh")).lower()
-        t0 = time.time()
-        test_cmd = "curl -I --connect-timeout 8 https://www.google.com | head -n 2"
-
-        # 1. 宿主机 Docker 穿透模式 (Legacy)
-        if access_mode == "docker_host":
-            cname = target.get("container_name") or target.get("name") or "app-container"
-            ssh_host = target.get("ssh_host") or target.get("host") or "127.0.0.1"
-            ssh_user = target.get("ssh_user") or "ubuntu"
-            try:
-                res = subprocess.run(
-                    ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5",
-                     f"{ssh_user}@{ssh_host}", "docker", "exec", "-i", cname, "sh"],
-                    input=test_cmd,
-                    capture_output=True,
-                    text=True,
-                    errors="replace",
-                    timeout=14
-                )
-                rtt_ms = round((time.time() - t0) * 1000, 1)
-                is_online = (res.returncode == 0 and any(code in res.stdout for code in ("200", "301", "302")))
-                status_line = res.stdout.strip().split("\n")[0] if res.stdout.strip() else ("HTTP 200 OK" if is_online else "直连超时或未通外网")
-                self.send_json({
-                    "success": True,
-                    "node_id": node_id,
-                    "online": is_online,
-                    "latency_ms": rtt_ms if is_online else None,
-                    "status_line": status_line,
-                    "is_proxy_enabled": target.get("is_proxy_enabled", False),
-                    "message": "容器出海访问正常" if is_online else "容器处于直连状态或外网未连通"
-                })
-            except Exception as e:
-                self.send_json({"success": False, "node_id": node_id, "online": False, "error": str(e), "message": f"远程容器检测异常: {e}"})
-            return
-
-        # 2. 本地 Linux 节点 (动态检测当前服务器本机)
-        if is_local_host(target.get("host")) and int(target.get("port") or 22) == 22 and not target.get("container_name"):
-            try:
-                res = subprocess.run(["curl", "-I", "--connect-timeout", "8", "https://www.google.com"], capture_output=True, text=True, errors="replace", timeout=14)
-                rtt_ms = round((time.time() - t0) * 1000, 1)
-                is_online = (res.returncode == 0 and any(code in res.stdout for code in ("200", "301", "302")))
-                status_line = res.stdout.strip().split("\n")[0] if res.stdout.strip() else ("HTTP 200 OK" if is_online else "直连超时或未通外网")
-                self.send_json({
-                    "success": True,
-                    "node_id": node_id,
-                    "online": is_online,
-                    "latency_ms": rtt_ms if is_online else None,
-                    "status_line": status_line,
-                    "is_proxy_enabled": target.get("is_proxy_enabled", False),
-                    "message": "本地计算节点出海访问正常" if is_online else "本地计算节点未通外网 (处于直连模式)"
-                })
-            except Exception as e:
-                self.send_json({"success": False, "node_id": node_id, "online": False, "error": str(e), "message": f"节点连通性检测异常: {e}"})
-            return
-
-        # 3. 通用远程 SSH 直连通道 (物理工作站 / 工控机 / 边缘设备 / 暴露端口容器)
-        host = target.get("host")
-        port = int(target.get("port") or 22)
-        user = target.get("ssh_user") or ("root" if os_type == "docker" else "ubuntu")
-        auth_type = target.get("auth_type") or ("password" if target.get("ssh_pass") else "key")
-        password = target.get("ssh_pass")
-        try:
-            res = run_remote_ssh_script(host, port, user, auth_type, password, test_cmd, timeout=14)
-            rtt_ms = round((time.time() - t0) * 1000, 1)
-            is_online = (res.returncode == 0 and any(code in res.stdout for code in ("200", "301", "302")))
-            status_line = res.stdout.strip().split("\n")[0] if res.stdout.strip() else ("HTTP 200 OK" if is_online else "直连超时或未通外网")
-            self.send_json({
-                "success": True,
-                "node_id": node_id,
-                "online": is_online,
-                "latency_ms": rtt_ms if is_online else None,
-                "status_line": status_line,
-                "is_proxy_enabled": target.get("is_proxy_enabled", False),
-                "message": f"节点【{target['name']}】出海访问正常" if is_online else f"节点【{target['name']}】处于直连状态或外网未连通"
-            })
-        except Exception as e:
-            self.send_json({"success": False, "node_id": node_id, "online": False, "error": str(e), "message": f"远程节点检测异常: {e}"})
-        return
+        result = check_node_http(target)
+        self.send_json(dict(result, success="error" not in result, node_id=node_id,
+                            message=result["status_line"]))
 
     def handle_gateway_add(self):
         req_json = self.read_json_body()
@@ -1295,6 +1182,10 @@ echo "=================================================="
             "description": desc,
             "is_default": False
         }
+        gateway_url(new_gw)
+        if not gateways:
+            cfg["active_gateway_id"] = gid
+            new_gw["is_default"] = True
         gateways.append(new_gw)
         cfg["gateways"] = gateways
         save_config(cfg)
@@ -1325,6 +1216,7 @@ echo "=================================================="
         if "protocol" in req_json: target["protocol"] = req_json["protocol"].strip()
         if "description" in req_json: target["description"] = req_json["description"].strip()
 
+        gateway_url(target)
         save_config(cfg)
         self.send_json({"success": True, "message": "代理网关更新成功", "gateway": target})
 
@@ -1371,12 +1263,13 @@ echo "=================================================="
 
         cfg = load_config()
         gw = resolve_gateway_info(cfg, gid)
-        gw_arg = f"{gw['host']}:{gw['port']}"
+        gw_arg = gateway_url(gw)[len("http://"):]
 
+        self.close_connection = True
         self.send_response(200)
+        self.send_header("Connection", "close")
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
 
         def send_event(data_dict):
@@ -1414,7 +1307,7 @@ echo "=================================================="
                 "type": "finish",
                 "exit_code": p.returncode,
                 "env_clean": env_clean,
-                "msg": f"沙箱任务运行结束 (退出码: {p.returncode})。进程已销毁，全局网络环境 100% 纯净无残留。"
+                "msg": f"任务结束，子进程退出码为 {p.returncode}。"
             })
         except Exception as e:
             send_event({
@@ -1423,34 +1316,28 @@ echo "=================================================="
             })
 
 
-def run_server(port: int = None):
+def run_server(port=None, bind=None):
     cfg = load_config()
-    server_port = port if port else int(cfg.get("web_port", 8899))
-    server_address = ("0.0.0.0", server_port)
-
-    # 启动时自动同步各物理节点/容器的底层专有配置状态 (自愈保障)
-    try:
-        ensure_node_provisioning_state(cfg)
-    except Exception as e:
-        print(f"[Warning] 节点状态自愈初始化警告: {e}")
-
-    httpd = ThreadingHTTPServer(server_address, ProxyConsoleHandler)
-    print("==================================================")
-    print(" net-proxy-tool 通用跨平台 Web 控制台 (v1.3.0)")
-    print(f" 监听端口: {server_port}")
-    print(f" 浏览器访问: http://localhost:{server_port}")
-    print(" 纯 Python 3 标准库 · 进程级沙箱 · Docker 隔离 · 零依赖")
-    print("==================================================")
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("\n正在停止 Web 控制台...")
-        httpd.server_close()
+    port = port if port is not None else int(cfg.get("web_port", 8899))
+    host = bind or os.environ.get("NET_PROXY_BIND", "127.0.0.1")
+    with ThreadingHTTPServer((host, port), ProxyConsoleHandler) as httpd:
+        print(f"net-proxy-tool | http://{host}:{httpd.server_port}", flush=True)
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            pass
 
 
 def main():
-    p = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else None
-    run_server(p)
+    parser = argparse.ArgumentParser(description="Start the net-proxy-tool web console")
+    parser.add_argument("legacy_port", nargs="?", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--port", type=int)
+    parser.add_argument("--bind", help="Listen address (default: 127.0.0.1)")
+    args = parser.parse_args()
+    try:
+        run_server(args.port if args.port is not None else args.legacy_port, args.bind)
+    except (OSError, ValueError) as exc:
+        parser.exit(1, f"net-proxy-tool: {exc}\n")
 
 
 if __name__ == "__main__":

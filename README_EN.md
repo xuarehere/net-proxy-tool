@@ -1,189 +1,50 @@
-# net-proxy-tool: Cross-Platform Native Proxy Orchestrator & Docker Isolation Suite (v1.3.0)
+# net-proxy-tool
 
-<p align="center">
-  <a href="README.md">简体中文</a> •
-  <a href="README_EN.md">English</a> •
-  <a href="QUICKSTART.md">QuickStart Guide</a> •
-  <a href="CHANGELOG.md">Changelog</a> •
-  <a href="CONTRIBUTING.md">Contributing</a>
-</p>
+[![Release checks](https://github.com/xuarehere/net-proxy-tool/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/xuarehere/net-proxy-tool/actions/workflows/ci.yml) · [GitHub Releases](https://github.com/xuarehere/net-proxy-tool/releases/latest)
 
-<p align="center">
-  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT">
-  <img src="https://img.shields.io/badge/Python-3.8%2B-brightgreen.svg" alt="Python: 3.8+">
-  <img src="https://img.shields.io/badge/Dependencies-Zero%20(Pure%20Stdlib)-orange.svg" alt="Zero Dependencies">
-  <img src="https://img.shields.io/badge/Arch-x86__64%20%7C%20ARM64-success.svg" alt="Architecture">
-  <img src="https://img.shields.io/badge/OS-Linux%20%7C%20Docker%20%7C%20Windows%20%7C%20macOS-blueviolet.svg" alt="OS Support">
-  <img src="https://img.shields.io/badge/Release-v1.3.0-blue.svg" alt="Release: v1.3.0">
-</p>
+[简体中文](README.md) · [Quick start](QUICKSTART_EN.md) · [Operations](docs/operations_en.md) · [Changelog](CHANGELOG.md)
 
----
+Use a local Web console to route a command, a Python task or a selected remote node through an existing HTTP proxy. Test a request in the browser before choosing which workloads should use the gateway.
 
-`net-proxy-tool` is a **pure-native, zero-dependency, zero-pollution, dual-layer zero-command** proxy dispatching and network orchestration suite engineered for **x86/ARM Linux servers, Docker containers, Windows/macOS workstations, and industrial edge nodes**.
+## Download and open the console
 
-It solves a fundamental pain point in hybrid enterprise networks and lab environments: **how to grant restricted nodes (AI workstations, industrial controllers, isolated Docker containers) smooth outbound access to global resources (GitHub, Google, HuggingFace, PyPI, OpenAI API) while guaranteeing absolute zero environment pollution to the host OS or neighboring production containers.**
+| System | Download v1.4.0 | Start after extracting |
+| --- | --- | --- |
+| Windows | [x64 · ZIP](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.0/net-proxy-tool-windows-x64.zip) | `Start.bat` |
+| macOS | [Apple Silicon · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.0/net-proxy-tool-macos-arm64.tar.gz) | `./net-proxy-tool` |
+| macOS | [Intel · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.0/net-proxy-tool-macos-x64.tar.gz) | `./net-proxy-tool` |
+| Linux · glibc | [x86_64 · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.0/net-proxy-tool-linux-x64.tar.gz) | `./net-proxy-tool` |
+| Linux · glibc | [ARM64 · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.0/net-proxy-tool-linux-arm64.tar.gz) | `./net-proxy-tool` |
 
----
+The release checks run the downloaded packages on Windows x64, macOS 15 (Intel and Apple Silicon), Ubuntu 24.04 (x64 and ARM64), plus clean Ubuntu 22.04/24.04 and Debian 12 x64 containers. For Alpine/musl, use [Docker Compose](docs/operations_en.md).
 
-## 🌟 Key Features
+1. **Extract the entire archive** and open its `net-proxy-tool` folder. On Windows, double-click `Start.bat`. On macOS or Linux, run `./net-proxy-tool` in that folder. The release archives include Python.
+2. In the browser, enter the **host and HTTP or mixed port** of a running proxy, then save it. Use `127.0.0.1` when the proxy client runs on the same computer. Read the port from that client's settings.
+3. Click **发送代理请求** (Send proxy request). A successful HTTP status from your target completes the first request.
 
-1. **Industrial Batch Management & Quick Search (v1.3.0)**:
-   * **🛑 One-Click Global Direct Restore**: Concurrently broadcast removal instructions to all proxied nodes in under 1 second, clearing proxy environments and restoring 100% direct connection for shift handover or internal maintenance.
-   * **🔍 Millisecond Search & Filtering Toolbar**: Real-time filtering by node name, IP, port, container name, or business tags, with multi-dimensional filtering (Docker only, physical machine only, proxied only).
-   * **📋 Node Configuration Cloning**: Clone existing host attributes to register adjacent container ports (e.g., `6600`, `6601`) in 3 seconds.
-   * **🔄 Concurrent Health Inspection & 📜 Audit Logs**: Batch probe live network round-trip latency across all nodes and inspect historical operation audit trails in an interactive modal.
-2. **Unified Node Provisioning Engine**:
-   * **Direct SSH for Physical & Edge Machines**: Native support for x86_64 and ARM64 servers, Jetson, Raspberry Pi, and industrial PCs on port 22.
-   * **Direct SSH for Port-Mapped Docker Containers**: Directly manages containers with exposed SSH ports (e.g., `-p 6600:22`), configuring inside the container without requiring host Docker daemon privileges.
-   * **Host Docker Penetration Access**: Backwards-compatible penetration mode via `docker exec` for microservices without OpenSSH.
-   * **Zero-Dependency Password Auth & Key Auto-Enrollment**: Utilizes native standard library `SSH_ASKPASS` + `setsid` (zero `sshpass` requirement); automatically deposits public keys into `~/.ssh/authorized_keys` upon initial successful connection for subsequent passwordless operations.
-   * **Three-Stage Deep Preflight**: Progressively validates TCP 3-way handshake -> SSH banner handshake -> credential authentication.
-3. **Dual-Layer Zero-Command Engine**:
-   * **Tool-Specific Configuration Layer (Level 1)**: Manages `~/.curlrc`, `~/.gitconfig`, `~/.config/pip/pip.conf`, `~/.wgetrc`, and `/etc/apt/apt.conf.d/`.
-     * **Instant Effect**: Tools reload configuration on every invocation. **Even inside tmux sessions or terminal tabs running for days, typing `curl`, `git clone`, or `pip install` immediately routes through the proxy with ZERO manual configuration commands.**
-   * **Global Shell Top-Level Injection (Level 2)**: Injects proxy environment variables at line 1 of `~/.bashrc` before Ubuntu non-login shell early exits (`[ -z "$PS1" ] && return`), covering Python `requests`, Go, and Node.js runtimes.
-4. **Absolute Docker Environment Isolation**:
-   * **Precise Target Injection**: Changes are confined strictly inside the targeted container.
-   * **Host & Neighbor Isolation**: The host machine and all other containers maintain 100% clean, native direct network stacks (`env | grep -i proxy` strictly empty).
-5. **Lightweight Web Console (@ Port 8899)**:
-   * **Pure Python Standard Library**: Built with `http.server`, `urllib`, `socket` — **zero `pip install` required**.
-   * **Anti-Cache Protection**: Enforces `Cache-Control: no-cache, no-store, must-revalidate` and cache-busting query fingerprints.
-   * **Interactive Status Capsules**: Responsive `.status-capsule` elements with pulsing green LED animations and real-time millisecond RTT pill badges.
-   * **Global Diagnostic Matrix**: Concurrent real-time latency probes for Google, GitHub, Raw GitHub, HuggingFace, PyPI, OpenAI API, and YouTube.
-6. **Ephemeral Proxy CLI & SDK Suite**:
-   * `with-proxy` CLI: Single-command ephemeral execution for Linux, macOS, and Windows. Automatically cleans up upon command exit; supports `--no-check` to bypass preflight.
-   * Python SDK Context Manager: `with ProxySession(): ...` guarantees 100% environment cleanup upon exit or uncaught exceptions.
-   * Session Activators: `source bin/proxy-on` / `proxy-off` for Linux/macOS and `bin/proxy-on.ps1` for Windows PowerShell.
+For checksums, source installation, shutdown and port conflicts, see the [quick start](QUICKSTART_EN.md). [Release assets and checksums](https://github.com/xuarehere/net-proxy-tool/releases/tag/v1.4.0)
 
----
+## Where requests travel
 
-## 🏛️ Architecture Overview
+![The console and CLI configure applications. Applications send requests through an existing proxy. SSH and Docker can configure remote nodes.](docs/assets/architecture.en.svg)
 
-```
-                 +-------------------------------------------------------+
-                 |     Web Console (http://localhost:8899)               |
-                 |  - 4-Step Wizard   - Topology CRUD    - 7-Service Matrix |
-                 |  - Status Capsule  - Ephemeral Push   - Loopback Testing |
-                 +---------------------------+---------------------------+
-                                             |
-             +-------------------------------+-------------------------------+
-             | (Channel 1: Universal SSH)                                    | (Channel 2: Host Penetration)
-             v                                                               v
-+---------------------------------+                         +---------------------------------+
-| Target A: Linux Workstation/PC  |                         | Host OS (100% Clean & Direct)   |
-| (x86_64 / ARM64 / Industrial)   |                         | env | grep proxy strictly empty |
-| - Port 22 direct connection     |                         +----------------+----------------+
-| - Auto public key enrollment    |                                          | docker exec
-| 👉 Terminal: curl immediately   |                                          v
-+---------------------------------+                         +---------------------------------+
-                                                            | Target C: Microservice Container|
-+---------------------------------+                         | (No SSH exposed)                |
-| Target B: Port-Mapped Container |                         | - Injected strictly inside      |
-| (e.g. Sandbox mapped to 6600)   |                         | 👉 Container executes out       |
-| - Mapped port 6600 -> 22        |                         +---------------------------------+
-| - Isolated filesystem & network |
-| 👉 Container: curl immediately  |
-+---------------------------------+
-             |
-             +-------------------------------+-------------------------------+
-                                             |
-                                             v
-                            +---------------------------------+
-                            |   LAN Proxy Gateway (Port 7890) |
-                            |   Clash / Mihomo / Shadowsocks  |
-                            +---------------------------------+
-                                             |
-                                             v
-                            +---------------------------------+
-                            |   Global Internet (Google,      |
-                            |   GitHub, HuggingFace, OpenAI)  |
-                            +---------------------------------+
-```
+The browser connects locally or through an SSH tunnel. Dashed lines show the console starting a local task, configuring a Linux account over SSH or using `docker exec` on a host to reach its container. The CLI and SDK can run local tasks independently. Solid lines follow each application's request through the user's HTTP proxy to its destination. [Open the full-size SVG to zoom on mobile](docs/assets/architecture.en.svg)
 
----
+![First-run Web console with fields for a gateway name, host and port, and a proxy request test](docs/assets/console.png)
 
-## 🚀 Quick Start
+## Choose where the proxy applies
 
-### 1. Launch Web Console
-Run on any workstation, server, or management gateway:
+| Use case | Entry point | Scope |
+| --- | --- | --- |
+| Run Git, curl or pip through a proxy once | Web console or CLI | The child process and its descendants |
+| Use a proxy in part of a Python program | `with ProxySession():` | Process-wide proxy variables, restored when the block exits |
+| Manage Linux hosts and containers | Node management in the Web console | The selected remote account, tool configuration or container until changed |
 
-- **Via Python Standard Library (Zero dependencies)**:
-  ```bash
-  # Linux / macOS (Daemon mode)
-  ./web/start.sh
+## Documentation
 
-  # Windows
-  web\start.bat
-  ```
-  Console listens on `http://0.0.0.0:8899`. Open `http://localhost:8899` in your browser.
+- [Quick start](QUICKSTART_EN.md) covers the first proxy request, running from source and the Python SDK.
+- [Operations and troubleshooting](docs/operations_en.md) covers settings, upgrades, SSH, containers and logs.
+- [Security policy](SECURITY.md) describes the console's permissions, credential handling and vulnerability reporting.
+- [Contributing](CONTRIBUTING.md) explains how to test changes and regenerate the architecture diagrams.
 
-- **Via Docker Compose**:
-  ```bash
-  docker compose up -d
-  ```
-
----
-
-### 2. Manage Nodes Without Commands
-
-1. Navigate to **【🌐 Topology & Node Management】**.
-2. Click **【➕ Register New Node】** (see [QUICKSTART.md](QUICKSTART.md) for scenarios).
-3. Click **【⚡ Turn On】** in the interactive status capsule.
-4. Click **【🔍 Test Outbound】** to run real-time HTTP loopback tests on the target machine.
-
----
-
-### 3. Outbound from Target Environment
-
-Directly run commands on the target node without typing any proxy setup commands:
-```bash
-curl -I https://www.google.com
-git clone https://github.com/octocat/Hello-World.git
-pip install requests
-```
-
----
-
-### 4. Ephemeral Single-Command Execution
-
-```bash
-# Linux / macOS
-./bin/with-proxy curl -I https://www.google.com
-./bin/with-proxy pip install torch torchvision
-
-# Windows PowerShell
-.\bin\with-proxy.ps1 curl.exe -I https://www.google.com
-```
-
----
-
-### 5. Python Native SDK
-
-```python
-from sdk.proxy_session import ProxySession
-import urllib.request
-
-# Environment restored 100% to direct upon exit or exception
-with ProxySession():
-    req = urllib.request.Request("https://api.github.com/zen", headers={"User-Agent": "curl/8.0"})
-    with urllib.request.urlopen(req, timeout=5) as resp:
-        print("GitHub Zen:", resp.read().decode().strip())
-```
-
----
-
-## 🧪 Automated Testing
-
-Run the full cross-platform test suite:
-```bash
-python test/test_cross_platform.py
-```
-
-All 5 core test classes and 11 subtests pass with 100% coverage on Windows, Linux, and macOS without third-party packages.
-
----
-
-## 📄 License
-
-Licensed under the [MIT License](LICENSE).  
-Copyright (c) 2026 `xuarehere`.
+[MIT license](LICENSE)

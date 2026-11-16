@@ -1,46 +1,147 @@
-name: Cross-Platform CI
-
+name: Test and package
 on:
-  push:
-    branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
 
+env:
+  PYTHONUTF8: '1'
+  PYTHONIOENCODING: utf-8
+permissions:
+  contents: read
 jobs:
-  test:
-    name: Test on ${{ matrix.os }} - Python ${{ matrix.python-version }}
-    runs-on: ${{ matrix.os }}
+  native:
+    name: ${{ matrix.target }}
     strategy:
       fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
-
+      matrix: &platforms
+        include:
+          - { target: windows-x64, os: windows-2022 }
+          - { target: linux-x64, os: ubuntu-24.04 }
+          - { target: linux-arm64, os: ubuntu-24.04-arm }
+          - { target: macos-x64, os: macos-15-intel }
+          - { target: macos-arm64, os: macos-15 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Run Automated Test Suite (Zero Dependencies)
+          python-version: '3.12'
+      - run: python -X utf8 -m unittest discover -s test
+      - name: Install and exercise the release wheel outside the repository
+        if: matrix.target == 'windows-x64' || matrix.target == 'linux-x64'
+        run: python -X utf8 packaging/test_wheel.py
+      - run: python packaging/build_portable.py "${{ matrix.target }}"
+      - name: Install browser test driver
         run: |
-          python test/test_cross_platform.py
-
-  sanitization-audit:
-    name: Sensitive Data & Secret Leakage Audit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Verify Zero Private IPs & Credentials
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Launch from a clean archive and configure a real local test proxy
         run: |
-          echo "Scanning for internal subnet patterns..."
-          if grep -rnE "10\.192\.41" . --exclude="*.git*" --exclude="config.json" ; then
-            echo "::error::Sensitive IP detected in codebase!"
-            exit 1
+          mkdir -p "build/中文 Portable"
+          if [[ "${{ runner.os }}" == Windows ]]; then
+            python -m zipfile -e dist/*.zip "build/中文 Portable"
+          else
+            tar -xzf dist/*.tar.gz -C "build/中文 Portable"
           fi
-          echo "Data sanitization check: PASSED"
+          python -X utf8 packaging/smoke.py "build/中文 Portable/net-proxy-tool" --browser
+      - name: Record Gatekeeper and quarantined first launch
+        if: runner.os == 'macOS'
+        run: python packaging/macos_gatekeeper.py "build/中文 Portable/net-proxy-tool"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/net-proxy-tool-*
+          if-no-files-found: error
+
+  distributions:
+    name: Portable on ${{ matrix.base }}
+    needs: native
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        base: ['ubuntu:22.04', 'ubuntu:24.04', 'debian:12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-x64
+          path: dist
+      - name: Start without system Python, SSH credentials or outside network
+        run: |
+          docker run --rm --network none -v "$PWD/dist:/packages:ro" -v "$PWD/packaging/smoke.py:/smoke.py:ro" "${{ matrix.base }}" sh -ec '
+            mkdir -p "/tmp/中文 Portable"
+            cd "/tmp/中文 Portable"
+            tar xzf /packages/net-proxy-tool-linux-x64.tar.gz
+            net-proxy-tool/runtime/bin/python3 /smoke.py ./net-proxy-tool'
+
+  container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 packaging/test_compose.py
+      - name: Verify real SSH-to-Docker control and neighboring-container isolation
+        run: python3 packaging/test_docker_host.py
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [native, distributions, container]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the five tested archives and their SHA-256 checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor HEAD origin/main
+          test "$TAG" = "v$(python -c 'from sdk.config import VERSION; print(VERSION)')"
+          cd dist
+          files=(net-proxy-tool-windows-x64.zip net-proxy-tool-linux-{x64,arm64}.tar.gz net-proxy-tool-macos-{x64,arm64}.tar.gz)
+          sha256sum "${files[@]}" > SHA256SUMS.txt
+          awk -v heading="## [${TAG#v}]" 'index($0,heading)==1 {show=1; next} /^## / && show {exit} show {print}' ../CHANGELOG.md > "$RUNNER_TEMP/changes.md"
+          test -s "$RUNNER_TEMP/changes.md"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --verify-tag --notes-file "$RUNNER_TEMP/changes.md" --title "$TAG"
+          fi
+          test "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true
+          gh release upload "$TAG" "${files[@]}" SHA256SUMS.txt --clobber
+          gh release edit "$TAG" --draft=false
+          mkdir verify
+          gh release download "$TAG" --dir verify
+          (cd verify && sha256sum -c SHA256SUMS.txt)
+
+  verify_public:
+    name: Download and run ${{ matrix.target }} from the public Release
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix: *platforms
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - run: python -X utf8 packaging/verify_download.py "${{ github.ref_name }}" "${{ matrix.target }}"
