@@ -4,7 +4,7 @@
 
 The console runs commands with the privileges of its operating-system account. A node switch can update files in another account or container over SSH. Run the console as a regular user and give each remote login only the permissions its workload needs. A child process inherits the user's file and network access. Proxy environment variables only affect applications that honor them.
 
-The desktop launcher binds to loopback. Compose publishes the container port on the host's loopback interface. For a remote machine, use SSH port forwarding to reach the console. Keep the management port off public networks. Requests from untrusted browsers are checked against the allowed host and origin. Other software running under your account is inside the trust boundary.
+The desktop launcher binds to loopback. Compose publishes the container port on the host's loopback interface. For a remote machine, use SSH port forwarding to reach the console. Keep the management port off public networks. Requests from untrusted browsers are checked against the allowed host and origin. The management API has no per-user login. Every local account or process that can connect to the loopback port can operate the console with the server account's privileges. On shared servers, isolate the listener in a dedicated network namespace or VM and restrict access to trusted operators. An SSH tunnel protects remote transport; it does not exclude other local clients.
 
 ## Credentials and backups
 
@@ -19,4 +19,4 @@ Use the repository's [Security page](https://github.com/xuarehere/net-proxy-tool
 
 ## 中文说明
 
-控制台可以以当前账号的权限执行命令。远程节点的开关可以修改目标工具或 shell 配置，root 账号还能修改系统级设置。控制台应由普通用户在回环地址运行；从其他机器访问时使用 SSH 端口转发。配置可能含 SSH 密码，`data/instance.json` 含停机令牌，均应限制读取权限。Windows 控制端使用 OpenSSH 密钥认证。报告漏洞时请使用私密渠道，附版本、平台以及使用临时凭据的最小复现步骤。
+控制台可以以当前账号的权限执行命令。远程节点的开关可以修改目标工具或 shell 配置，root 账号还能修改系统级设置。控制台应由普通用户在回环地址运行。管理接口没有逐用户登录，能访问该回环端口的本机账号或程序都可以操作控制台。共享服务器应通过独立网络命名空间或虚拟机限制访问，只允许受信任的操作人员连接。从其他机器访问时使用 SSH 端口转发，本机端口仍需隔离。配置可能含 SSH 密码，`data/instance.json` 含停机令牌，均应限制读取权限。Windows 控制端使用 OpenSSH 密钥认证。报告漏洞时请使用私密渠道，附版本、平台以及使用临时凭据的最小复现步骤。

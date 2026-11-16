@@ -19,12 +19,9 @@ def check_gateway(host: str, port: int, timeout: float = 0.6) -> bool:
 def main():
     raw_args = sys.argv[1:]
     if not raw_args or raw_args in (["--help"], ["-h"]):
-        print("net-proxy-tool: 跨平台通用代理沙箱执行器 (v1.4.0)")
-        print("用法: python with_proxy.py [--gateway host:port] [--no-check] <命令> [参数...]")
-        print("示例:")
-        print("  python with_proxy.py curl -I https://www.google.com")
-        print("  python with_proxy.py --gateway 192.168.1.100:7890 git clone https://github.com/octocat/Hello-World.git")
-        print("  python with_proxy.py --no-check pip install openai httpx")
+        print("Run one command using the gateway selected in the Web console.")
+        print("Usage: with-proxy [--gateway HOST:PORT|ID] [--no-check] COMMAND [ARG ...]")
+        print("Example: with-proxy curl -I https://example.com/")
         sys.exit(0 if raw_args else 1)
 
     explicit_gw = None
@@ -33,7 +30,9 @@ def main():
     i = 0
     while i < len(raw_args):
         arg = raw_args[i]
-        if arg in ("--gateway", "-g") and i + 1 < len(raw_args):
+        if arg in ("--gateway", "-g"):
+            if i + 1 >= len(raw_args):
+                sys.exit("--gateway requires a host:port or a gateway ID.")
             explicit_gw = raw_args[i + 1]
             i += 2
         elif arg.startswith("--gateway="):
@@ -47,7 +46,7 @@ def main():
             break
 
     if not cmd:
-        print("[net-proxy-tool 错误] 未指定待执行命令！", file=sys.stderr)
+        print("Specify a command to run.", file=sys.stderr)
         sys.exit(1)
 
     try:
@@ -58,7 +57,7 @@ def main():
 
     if not skip_check and not check_gateway(host, port):
         print(
-            f"[net-proxy-tool 错误] 代理网关 {host}:{port} 不可达！请检查该代理工作站状态。",
+            f"Gateway {host}:{port} is unreachable. Check its host and listening port.",
             file=sys.stderr
         )
         sys.exit(101)
@@ -72,10 +71,10 @@ def main():
     except KeyboardInterrupt:
         sys.exit(130)
     except FileNotFoundError:
-        print(f"[net-proxy-tool 错误] 找不到命令: {cmd[0]}", file=sys.stderr)
+        print(f"Command not found: {cmd[0]}", file=sys.stderr)
         sys.exit(127)
     except Exception as e:
-        print(f"[net-proxy-tool 错误] 执行失败: {e}", file=sys.stderr)
+        print(f"Command failed: {e}", file=sys.stderr)
         sys.exit(1)
 
 

@@ -528,8 +528,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function renderHandoverBlocks() {
-    const client = selectedWizardClient || (appConfig && appConfig.clients && appConfig.clients[0]) || { name: "业务计算节点", os_type: "linux", host: "192.168.1.101" };
-    const gw = selectedWizardGateway || activeGateway || { host: "192.168.1.100", port: 7890 };
+    const client = selectedWizardClient;
+    if (!client) return;
+    const gw = appConfig.gateways.find(g => g.id === client.bound_gateway_id) || activeGateway;
+    if (!gw) return;
     const osType = (client.os_type || "linux").toLowerCase();
 
     handoverTargetName.textContent = `${client.name} (${osType.toUpperCase()}, ${client.host})`;
@@ -537,16 +539,16 @@ document.addEventListener("DOMContentLoaded", () => {
     if (wizardTargetDispName) wizardTargetDispName.textContent = `${client.name} (${osType.toUpperCase()})`;
     if (wizardTargetDispSub) {
       if (osType === "docker") {
-        wizardTargetDispSub.textContent = `目标 IP: ${client.host} | 容器名: ${client.container_name || 'app-container'} | 隔离性: 宿主机与其他容器 100% 保持直连`;
+        wizardTargetDispSub.textContent = `目标 IP: ${client.host} | 容器名: ${client.container_name || 'app-container'}`;
       } else {
-        wizardTargetDispSub.textContent = `目标 IP: ${client.host} | 绑定出口: ${gw.host}:${gw.port} | 进程/会话隔离: 零系统环境残留`;
+        wizardTargetDispSub.textContent = `目标 IP: ${client.host} | 绑定出口: ${gw.host}:${gw.port}`;
       }
     }
 
     const isProxyOn = Boolean(client.is_proxy_enabled);
     if (wizardSwitchBadge) {
       wizardSwitchBadge.className = isProxyOn ? "switch-badge on" : "switch-badge off";
-      wizardSwitchBadge.textContent = isProxyOn ? "🟢 出海通道已激活 (全功能就绪)" : "⚪ 当前处于原生直连状态 (未开启出海)";
+      wizardSwitchBadge.textContent = isProxyOn ? "🟢 已启用托管代理" : "⚪ 未启用托管代理";
     }
 
     handoverBlocksContainer.innerHTML = "";
@@ -554,7 +556,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let command;
     let title;
     if (osType === "windows") {
-      title = "在 Windows 源码目录中运行单次代理请求";
+      title = "在 Windows 工具目录中运行单次代理请求";
       command = ".\\bin\\with-proxy.cmd curl.exe -I https://example.com/";
     } else {
       title = "开启节点代理后，在目标工作站或容器内验证";
@@ -599,8 +601,8 @@ document.addEventListener("DOMContentLoaded", () => {
       if (data.success) {
         selectedWizardClient.is_proxy_enabled = true;
         wizardSwitchBadge.className = "switch-badge on";
-        wizardSwitchBadge.textContent = "🟢 出海通道已激活 (全功能就绪)";
-        showWizardFeedback("success", "✅ 下发成功", `${data.message}\n目标现已具备原生出海能力！在终端中直接执行 curl https://www.google.com 或 git clone 即可直接访问外网，无需输入任何代理命令。`);
+        wizardSwitchBadge.textContent = "🟢 已启用托管代理";
+        showWizardFeedback("success", "✅ 下发成功", `${data.message}\n点击「实时复测目标连通性」，或从目标终端执行 curl -I https://example.com/。`);
         await loadConfig();
       } else {
         showWizardFeedback("error", "❌ 下发失败", `下发失败: ${data.error || '未知错误'}`);
@@ -615,7 +617,7 @@ document.addEventListener("DOMContentLoaded", () => {
   wizardBtnProxyOff?.addEventListener("click", async () => {
     if (!selectedWizardClient) return;
     wizardBtnProxyOff.disabled = true;
-    showWizardFeedback("warning", "⏳ 正在注销...", `正在注销目标【${selectedWizardClient.name}】的代理配置并恢复原生直连...`);
+    showWizardFeedback("warning", "⏳ 正在注销...", `正在恢复目标【${selectedWizardClient.name}】在本次配置前的设置…`);
     try {
       const res = await fetch("/api/node-switch", {
         method: "POST",
@@ -629,8 +631,8 @@ document.addEventListener("DOMContentLoaded", () => {
       if (data.success) {
         selectedWizardClient.is_proxy_enabled = false;
         wizardSwitchBadge.className = "switch-badge off";
-        wizardSwitchBadge.textContent = "⚪ 当前处于原生直连状态 (未开启出海)";
-        showWizardFeedback("success", "✅ 已关闭", `${data.message}\n目标网络环境已彻底清理，100% 恢复为原始局域网直连。`);
+        wizardSwitchBadge.textContent = "⚪ 未启用托管代理";
+        showWizardFeedback("success", "✅ 已关闭", `${data.message}`);
         await loadConfig();
       } else {
         showWizardFeedback("error", "❌ 关闭失败", `关闭失败: ${data.error || '未知错误'}`);
@@ -656,7 +658,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (data.online) {
         showWizardFeedback("success", "🟢 外网畅通", `✅ 外网探测成功！\n响应状态: ${data.status_line || 'HTTP 200 OK'}\n探测耗时: ${data.latency_ms} ms\n节点状态: ${data.message}`);
       } else {
-        showWizardFeedback("error", "⚪ 直连未通外网", `⚪ 目标无法直连外网或代理未激活。\n状态: ${data.status_line || '超时'}\n提示: ${data.message}`);
+        showWizardFeedback("error", "目标请求失败", `目标上的请求未成功。\n状态: ${data.status_line || '超时'}\n提示: ${data.message}`);
       }
     } catch (e) {
       showWizardFeedback("error", "❌ 探测失败", `探测异常: ${e.message}`);
@@ -716,7 +718,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (!response.ok) {
         const errText = await response.text();
-        sbTerminalOutput.innerHTML += `<span style="color:#ef4444;">[错误] HTTP ${response.status}: ${errText}</span>\n`;
+        sbTerminalOutput.innerHTML += `<span style="color:#ef4444;">[错误] HTTP ${response.status}: ${escapeHtml(errText)}</span>\n`;
         sbStatusBadge.className = "badge-status";
         sbStatusBadge.textContent = "失败";
         sbRunBtn.disabled = false;
@@ -741,20 +743,17 @@ document.addEventListener("DOMContentLoaded", () => {
             try {
               const event = JSON.parse(rawJson);
               if (event.type === "start") {
-                sbTerminalOutput.innerHTML += `<span style="color:#38bdf8;">$ with-proxy ${event.command}</span>\n`;
-                sbTerminalOutput.innerHTML += `<span class="t-dim">[网关出海通道: ${event.gateway}]</span>\n`;
+                sbTerminalOutput.innerHTML += `<span style="color:#38bdf8;">$ with-proxy ${escapeHtml(event.command)}</span>\n`;
+                sbTerminalOutput.innerHTML += `<span class="t-dim">[网关出海通道: ${escapeHtml(event.gateway)}]</span>\n`;
               } else if (event.type === "stdout") {
                 sbTerminalOutput.innerHTML += `${escapeHtml(event.line)}\n`;
               } else if (event.type === "finish") {
                 const color = event.exit_code === 0 ? "#10b981" : "#f59e0b";
-                sbTerminalOutput.innerHTML += `\n<span style="color:${color}; font-weight:bold;">${event.msg}</span>\n`;
-                if (event.env_clean) {
-                  sbTerminalOutput.innerHTML += `<span style="color:#10b981;">🛡️ [零污染安全核验] 任务结束，系统环境变量 HTTP_PROXY 保持为空，宿主机环境 100% 纯净无残留。</span>\n`;
-                }
+                sbTerminalOutput.innerHTML += `\n<span style="color:${color}; font-weight:bold;">${escapeHtml(event.msg)}</span>\n`;
                 sbStatusBadge.className = event.exit_code === 0 ? "badge-status success" : "badge-status";
                 sbStatusBadge.textContent = event.exit_code === 0 ? "执行完毕" : `退出码: ${event.exit_code}`;
               } else if (event.type === "error") {
-                sbTerminalOutput.innerHTML += `<span style="color:#ef4444;">[异常] ${event.msg}</span>\n`;
+                sbTerminalOutput.innerHTML += `<span style="color:#ef4444;">[异常] ${escapeHtml(event.msg)}</span>\n`;
                 sbStatusBadge.className = "badge-status";
                 sbStatusBadge.textContent = "异常";
               }
@@ -812,7 +811,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const total = cachedClients.length;
     const onCount = cachedClients.filter(c => c.is_proxy_enabled).length;
     const offCount = total - onCount;
-    nodeStatsBadge.textContent = `共 ${total} 个节点 (${onCount} 出海中, ${offCount} 直连)`;
+    nodeStatsBadge.textContent = `共 ${total} 个节点 (${onCount} 已启用, ${offCount} 未启用)`;
   }
 
   function renderClientsTableRows(clientsToRender) {
@@ -869,7 +868,7 @@ document.addEventListener("DOMContentLoaded", () => {
         <td>
           <div class="status-capsule ${isProxyOn ? 'on' : 'off'}">
             <span class="capsule-indicator">
-              ${isProxyOn ? '<span class="pulse-dot"></span>已出海' : '⚪ 直连'}
+              ${isProxyOn ? '<span class="pulse-dot"></span>已启用' : '⚪ 未启用'}
             </span>
             <button class="capsule-btn ${isProxyOn ? 'btn-turn-off' : 'btn-turn-on'}" data-action="toggle-client" data-id="${escapeHtml(c.id)}" data-action-type="${isProxyOn ? 'off' : 'on'}">
               ${isProxyOn ? '🛑 关闭' : '⚡ 开启'}
@@ -960,7 +959,7 @@ document.addEventListener("DOMContentLoaded", () => {
               rttPill.textContent = "超时";
               rttPill.style.color = "#f87171";
             }
-            alert(`⚪ 节点处于直连或无法访问外网:\n状态: ${d.status_line || '超时'}\n说明: ${d.message}`);
+            alert(`目标上的请求未成功：\n状态: ${d.status_line || '超时'}\n说明: ${d.message}`);
           }
         } catch (e) {
           if (rttPill) rttPill.textContent = "ERR";
@@ -1074,7 +1073,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 一键全部切断代理恢复直连
   topDisableAllBtn?.addEventListener("click", async () => {
-    if (!confirm("⚠️ 确定要一键关闭所有节点的出海通道吗？\n这将彻底清除各节点和容器内的代理配置，全网恢复 100% 原生直连网络。")) {
+    if (!confirm("⚠️ 确定要一键关闭所有节点的出海通道吗？\n将按各节点的快照恢复托管配置。如有冲突，请核对操作结果和目标文件。")) {
       return;
     }
     topDisableAllBtn.disabled = true;
@@ -1087,12 +1086,12 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       const d = await res.json();
       await loadConfig();
-      alert(d.message || "已恢复全部节点直连");
+      alert(d.message || "已完成批量关闭，请查看各节点结果");
     } catch (e) {
       alert("切断异常: " + e.message);
     } finally {
       topDisableAllBtn.disabled = false;
-      topDisableAllBtn.innerHTML = '<span class="btn-icon">🛑</span> 一键恢复全部直连';
+      topDisableAllBtn.innerHTML = '<span class="btn-icon">🛑</span> 关闭全部节点代理';
     }
   });
 
@@ -1318,7 +1317,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (formClientHint) {
           formClientHint.style.color = "var(--primary)";
-          formClientHint.textContent = "💡 已切换至 Docker 容器模式：将直接直连容器内部，宿主机与其它容器 100% 保持直连不受影响。";
+          formClientHint.textContent = "💡 容器有 SSH 服务时填写映射端口；通过宿主机管理时请选择 Docker 穿透模式。";
         }
       } else if (os === "linux") {
         if (formClientPort && formClientPort.value === "6600") {
@@ -1728,18 +1727,13 @@ document.addEventListener("DOMContentLoaded", () => {
         body: JSON.stringify({ host: activeGateway.host, port: activeGateway.port })
       });
       const d = await res.json();
-      if (d.online) {
-        globalStatusPill.querySelector(".status-indicator-dot").className = "status-indicator-dot online";
-        sbGwStatusVal.textContent = "● 连通正常";
-        sbGwStatusVal.className = "m-val green";
-        sbGwRttSub.textContent = `TCP 延迟: ${d.latency_ms} ms`;
-      } else {
-        globalStatusPill.querySelector(".status-indicator-dot").className = "status-indicator-dot offline";
-        sbGwStatusVal.textContent = "● 端口异常";
-        sbGwStatusVal.className = "m-val";
-        sbGwStatusVal.style.color = "var(--danger)";
-        sbGwRttSub.textContent = d.error || "无法连接";
-      }
+      globalStatusPill.querySelector(".status-indicator-dot").className =
+        "status-indicator-dot " + (d.online ? "online" : "offline");
+      sbGwStatusVal.textContent = d.tcp_ok ? "已连接" : "连接失败";
+      sbGwStatusVal.className = d.tcp_ok ? "m-val green" : "m-val";
+      sbGwRttSub.textContent = d.tcp_ok ? "TCP 耗时 " + d.tcp_latency_ms + " ms" : (d.error || "无法连接");
+      sbDiagRateVal.textContent = d.code ? "HTTP " + d.code : (d.tcp_ok ? "请求失败" : "尚未请求");
+      sbDiagSummary.textContent = d.online ? d.url : (d.error || "请检查代理和目标地址");
     } catch (e) {
       console.error(e);
     }

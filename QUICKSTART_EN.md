@@ -29,6 +29,8 @@ sha256sum net-proxy-tool-linux-x64.tar.gz
 
 The desktop launcher opens your browser once the service responds. The default URL is `http://127.0.0.1:8899/`. If another program uses port 8899, try `.\Start.bat 8900` or `./net-proxy-tool 8900`. You can complete setup as a regular user without any remote nodes.
 
+The macOS archives are terminal distributions and are not notarized with Apple Developer ID. The macOS 15 Intel and Apple Silicon release checks record the signature assessment and a launch with a simulated download-quarantine marker. Follow your organization’s software policy on managed devices.
+
 ## 3. Add a gateway and send a request
 
 1. On the first tab, give the gateway a recognizable name and enter its actual host and port. Save it. Your first gateway becomes active.

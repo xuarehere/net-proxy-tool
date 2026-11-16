@@ -27,6 +27,8 @@ sha256sum net-proxy-tool-linux-x64.tar.gz
 - **macOS / Linux** · 解压 tar.gz，进入 `net-proxy-tool`，运行 `./net-proxy-tool`。若 macOS 提示未识别开发者，核对来源和校验和后，在“系统设置 → 隐私与安全性”查看该程序的打开选项。
 - **无桌面的服务器** · 运行 `./net-proxy-tool --no-browser`，在自己的电脑上按启动器输出的 SSH 端口转发命令连接，然后用本地浏览器访问。
 
+macOS 便携包按终端命令分发，未做 Apple Developer ID 公证。Intel 与 Apple Silicon 的 macOS 15 测试均记录了系统签名评估和带下载隔离标记的启动结果。受管理设备请遵循组织的应用准入策略。
+
 桌面启动器会在服务就绪后打开浏览器。默认地址是 `http://127.0.0.1:8899/`。若 8899 已被其他应用占用，可运行 `.\Start.bat 8900` 或 `./net-proxy-tool 8900`。首次使用不需要管理员权限或远程节点。
 
 ## 3. 保存网关，发出第一条请求
