@@ -1,0 +1,13 @@
+**
+!config.example.json
+!with_proxy.py
+!sdk/
+!sdk/*.py
+!web/
+!web/server.py
+!web/static/
+!web/static/index.html
+!web/static/app.js
+!web/static/style.css
+!web/__init__.py
+!web/provision.sh

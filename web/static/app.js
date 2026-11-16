@@ -176,8 +176,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!res.ok) throw new Error("加载配置失败: " + res.status);
       appConfig = await res.json();
       renderAll();
-      // 首次加载自动对当前网关做一次轻量级预检
-      initPrecheck();
+
     } catch (err) {
       console.error(err);
       globalStatusText.textContent = "配置加载失败";
@@ -185,11 +184,76 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  const setupForm = document.getElementById("setup-form");
+  const setupResult = document.getElementById("setup-result");
+  const setupHost = document.getElementById("setup-host");
+  const setupPort = document.getElementById("setup-port");
+  const setupName = document.getElementById("setup-name");
+  const setupUrl = document.getElementById("setup-url");
+  const setupCommand = document.getElementById("setup-command");
+  const setupTest = document.getElementById("setup-test");
+
+  function setupPayload() {
+    return {name: setupName.value.trim(), host: setupHost.value.trim(), port: Number(setupPort.value), protocol: "http"};
+  }
+
+  async function postJson(path, payload) {
+    const response = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || response.statusText);
+    return data;
+  }
+
+  setupForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    const button = document.getElementById("setup-save");
+    button.disabled = true;
+    try {
+      const payload = setupPayload();
+      const editing = activeGateway && setupForm.dataset.gateway === activeGateway.id;
+      if (editing) payload.id = activeGateway.id;
+      await postJson(editing ? "/api/gateways/update" : "/api/gateways/add", payload);
+      await loadConfig();
+      setupResult.textContent = "已保存网关。点击“发送代理请求”以验证目标站点。";
+    } catch (error) {
+      setupResult.textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  setupTest.addEventListener("click", async () => {
+    if (!setupForm.reportValidity()) return;
+    setupTest.disabled = true;
+    setupCommand.hidden = true;
+    setupResult.textContent = "正在连接代理并请求目标站点…";
+    try {
+      const data = await postJson("/api/test-gateway", {...setupPayload(), target_url: setupUrl.value});
+      const stage = data.tcp_ok ? "TCP 已连接" : "TCP 连接失败";
+      const status = data.online ? "代理请求成功" : "代理请求失败";
+      setupResult.textContent = [stage, status, data.code && ("HTTP " + data.code),
+        data.latency_ms != null && (data.latency_ms + " ms"), data.error].filter(Boolean).join(" · ");
+      if (data.online) {
+        setupCommand.textContent = "单命令用法：python with_proxy.py --gateway " +
+          (setupHost.value.includes(":") ? "[" + setupHost.value + "]" : setupHost.value) + ":" + setupPort.value + " <命令>";
+        setupCommand.hidden = false;
+      }
+    } catch (error) {
+      setupResult.textContent = error.message;
+    } finally {
+      setupTest.disabled = false;
+    }
+  });
+
   function renderAll() {
     const gateways = appConfig.gateways || [];
     activeGateway = gateways.find(g => g.id === appConfig.active_gateway_id) || gateways[0] || null;
 
     if (activeGateway) {
+      setupName.value = activeGateway.name;
+      setupHost.value = activeGateway.host;
+      setupPort.value = activeGateway.port;
+      setupForm.dataset.gateway = activeGateway.id;
       const gwStr = `${activeGateway.host}:${activeGateway.port}`;
       globalStatusText.textContent = `网关: ${gwStr}`;
       footerGwLabel.textContent = `${activeGateway.name} (${gwStr})`;
@@ -286,7 +350,7 @@ document.addEventListener("DOMContentLoaded", () => {
         unlockStep2();
       } else {
         step1Result.className = "step-result-banner error";
-        step1Result.innerHTML = `<strong>❌ 端口不可达:</strong> ${data.error}。请检查网关是否启动 Clash 并配置了 <code>allow-lan: true</code>。`;
+        step1Result.innerHTML = `<strong>代理请求失败</strong> ${data.error}。请检查网关是否启动 Clash 并配置了 <code>allow-lan: true</code>。`;
         statusTagStep1.className = "step-status-tag";
         statusTagStep1.textContent = "❌ 连通失败";
       }
@@ -1513,7 +1577,7 @@ with ProxySession():
     const osType = formClientOs ? formClientOs.value : "linux";
     const authType = formClientAuthType ? formClientAuthType.value : "key";
     const sshUser = formClientSshUser ? formClientSshUser.value.trim() : "root";
-    const sshPass = formClientSshPass ? formClientSshPass.value.trim() : "";
+    const sshPass = formClientSshPass ? formClientSshPass.value : "";
     const containerName = formClientContainer ? formClientContainer.value.trim() : "";
     const sshHost = formClientSshHost ? formClientSshHost.value.trim() : host;
 
@@ -1604,7 +1668,7 @@ with ProxySession():
       port = parseInt((formClientPort ? formClientPort.value.trim() : "22") || "22", 10);
       sshUser = formClientSshUser ? formClientSshUser.value.trim() : "root";
       authType = formClientAuthType ? formClientAuthType.value : "key";
-      sshPass = formClientSshPass ? formClientSshPass.value.trim() : "";
+      sshPass = formClientSshPass ? formClientSshPass.value : "";
       if (!name || !host) {
         formClientHint.style.color = "var(--danger)";
         formClientHint.textContent = "❌ 请填写节点名称和主机 IP";

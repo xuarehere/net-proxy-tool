@@ -6,8 +6,8 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>Net-Proxy-Tool 通用跨平台局域网出海与 Docker 容器隔离控制中心 (v1.3.0)</title>
-  <link rel="stylesheet" href="style.css?v=1.3.0">
+  <title>Net-Proxy-Tool 通用跨平台局域网出海与 Docker 容器隔离控制中心 (v1.4.0)</title>
+  <link rel="stylesheet" href="style.css?v=1.4.0">
 </head>
 <body>
   <div class="app-layout">
@@ -16,15 +16,15 @@
       <div class="navbar-brand">
         <span class="brand-icon">🚀</span>
         <div class="brand-info">
-          <h1>Net-Proxy-Tool <span class="tag-version">v1.3.0</span></h1>
-          <p class="brand-sub">纯净零依赖 · 进程级沙箱 · x86/ARM/Win/Mac/Linux 全架构通用 · 多网关/多节点拓扑</p>
+          <h1>Net-Proxy-Tool <span class="tag-version">v1.4.0</span></h1>
+          <p class="brand-sub">HTTP 代理控制台</p>
         </div>
       </div>
 
       <div class="navbar-right">
         <div class="global-status-pill" id="global-status-pill">
-          <span class="status-indicator-dot online"></span>
-          <span id="global-gw-status-text">网关: 192.168.1.100:7890</span>
+          <span class="status-indicator-dot"></span>
+          <span id="global-gw-status-text">尚未选择网关</span>
         </div>
         <!-- 导航 Tabs -->
         <nav class="nav-tab-group">
@@ -51,6 +51,23 @@
       <!-- TAB 1: 🎯 接入向导 (Setup Wizard, 4 步渐进流水线) -->
       <!-- ============================================================== -->
       <div class="tab-pane active" id="tab-wizard">
+        <section class="card setup-card" aria-labelledby="setup-title">
+          <div class="card-header"><h2 id="setup-title">连接你的 HTTP 代理</h2></div>
+          <p>填写已运行的 HTTP 或 mixed 代理监听地址。控制台从运行它的机器发送请求，本机代理请填写 127.0.0.1。</p>
+          <form id="setup-form">
+            <div class="setup-fields">
+              <label>网关名称<input id="setup-name" class="form-input" required value="本机代理"></label>
+              <label>代理地址<input id="setup-host" class="form-input" required placeholder="127.0.0.1"></label>
+              <label>端口<input id="setup-port" class="form-input" type="number" required min="1" max="65535" placeholder="7890"></label>
+            </div>
+            <button class="btn btn-secondary" id="setup-save" type="submit">保存网关</button>
+            <label class="setup-url">请求目标<input id="setup-url" class="form-input" type="url" value="https://example.com/"></label>
+            <button class="btn btn-primary" id="setup-test" type="button">发送代理请求</button>
+            <output id="setup-result" role="status" aria-live="polite"></output>
+            <p id="setup-command" hidden></p>
+          </form>
+        </section>
+        <details id="advanced-wizard"><summary>为远程机器或容器配置代理</summary>
         <div class="wizard-header-banner">
           <div class="banner-title">
             <h2>🎯 业务节点网络穿透与代理接入向导</h2>
@@ -90,7 +107,7 @@
               <span class="step-status-tag" id="status-tag-step-1">● 等待探测</span>
             </div>
             <p class="step-explain">
-              网关节点是具有科学出网权限的跳板机器（例如配置有 Clash Verge 的 183 工作站）。请选择网关并验证端口是否畅通：
+              网关节点是具有科学出网权限的跳板机器（例如运行 HTTP 代理的工作站）。请选择网关并验证端口是否畅通：
             </p>
             <div class="step-body-row">
               <div class="input-inline-group">
@@ -119,7 +136,7 @@
               <span class="step-status-tag" id="status-tag-step-2">🔒 待解锁</span>
             </div>
             <p class="step-explain">
-              选择需要出海访问的业务节点（例如 186 边缘 AI 计算节点、开发工作站或任意新接入的机器）。支持在下方直接登记新机器：
+              选择需要出海访问的业务节点（例如边缘计算节点、开发工作站或任意新接入的机器）。支持在下方直接登记新机器：
             </p>
             <div class="step-body-row">
               <div class="input-inline-group">
@@ -254,6 +271,7 @@
             </details>
           </section>
         </div>
+      </details>
       </div>
 
 
@@ -634,8 +652,8 @@ docker run --rm \
 
     <!-- 页脚 -->
     <footer class="app-footer">
-      <span>Net-Proxy-Tool v1.3.0 · 通用跨平台局域网出海与 Docker 容器隔离控制系统 · 纯 Python 原生零依赖</span>
-      <span>当前出网网关: <strong id="footer-gw-label">192.168.1.100:7890</strong></span>
+      <span>Net-Proxy-Tool v1.4.0 · 通用跨平台局域网出海与 Docker 容器隔离控制系统 · 纯 Python 原生零依赖</span>
+      <span>当前出网网关: <strong id="footer-gw-label">未配置</strong></span>
     </footer>
   </div>
 
@@ -801,7 +819,7 @@ docker run --rm \
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="modal-gw-test-btn">
-          <span class="btn-icon">⚡</span> 测试端口连通性
+          <span class="btn-icon">⚡</span> 测试代理请求
         </button>
         <button class="btn btn-primary" id="modal-gw-save-btn">
           <span class="btn-icon">💾</span> 保存网关
@@ -847,6 +865,6 @@ docker run --rm \
     </div>
   </div>
 
-  <script src="app.js?v=1.3.0"></script>
+  <script src="app.js?v=1.4.0"></script>
 </body>
 </html>

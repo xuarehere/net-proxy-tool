@@ -1,19 +1,11 @@
-version: "3.8"
-
 services:
   net-proxy-tool:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: net-proxy-tool
+    build: .
     restart: unless-stopped
     ports:
-      - "8899:8899"
+      - "127.0.0.1:${NET_PROXY_HOST_PORT:-8899}:8899"
     volumes:
-      # 挂载宿主机配置与审计日志 (按需挂载 config.json)
-      - ./config.json:/app/config.json:rw
-      - ./data:/app/data:rw
-      # 按需只读挂载宿主机 SSH 公私钥用于免密管理目标节点
-      # - ~/.ssh:/root/.ssh:ro
-    environment:
-      - PYTHONUNBUFFERED=1
+      - proxy-data:/app/data
+
+volumes:
+  proxy-data:

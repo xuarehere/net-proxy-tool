@@ -1735,3 +1735,13 @@ body {
   color: var(--primary);
 }
 
+
+.setup-card { margin: 0 auto 1.5rem; padding: clamp(1.25rem, 3vw, 2.5rem); }
+.setup-card > p, #setup-result { margin: .75rem 0 1.25rem; }
+.setup-fields { display: grid; grid-template-columns: 1fr 1.5fr .65fr; gap: 1rem; margin-bottom: 1rem; }
+.setup-card label, #setup-result { display: block; }
+.setup-card input { display: block; margin-top: .4rem; width: 100%; }
+.setup-url { max-width: 42rem; margin: 1.5rem 0 1rem; }
+#setup-result { min-height: 1.5rem; overflow-wrap: anywhere; }
+#advanced-wizard summary { cursor: pointer; padding: .75rem 0; font-weight: bold; }
+@media (max-width: 640px) { .setup-fields { grid-template-columns: 1fr; } }

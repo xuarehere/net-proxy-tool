@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" lang="en" viewBox="0 0 720 476" role="img" aria-labelledby="title description">
+  <title id="title">Proxy control and request paths</title><desc id="description">Solid arrows show network traffic. Dashed arrows show how the console or CLI configures applications.</desc>
+  <defs>
+    <marker id="control" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="#496568"/></marker>
+    <marker id="traffic" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="#17645b"/></marker>
+  </defs>
+  <style>
+    text {font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;fill:#163d40}
+    .title {font-size:32px;font-weight:700} .section {font-size:17px;font-weight:650;fill:#476566}
+    .node {font-size:22px;font-weight:650} .detail {font-size:16px;fill:#39595c}
+    .highlight {font-size:22px;font-weight:700;fill:#fff}
+    .control,.traffic {fill:none;stroke-width:2.4} .control {stroke:#496568;stroke-dasharray:5 4} .traffic {stroke:#17645b}
+  </style>
+  <rect width="720" height="476" rx="20" fill="#f8faf7"/>
+  <text x="32" y="53" class="title" text-anchor="start">Proxy control and request paths</text>
+  <text x="32" y="94" class="section" text-anchor="start">Local control</text>
+  <rect x="32" y="109" width="246" height="67" rx="14" fill="#e6eeeb"/>
+  <text x="155" y="150" class="node" text-anchor="middle">Browser</text>
+  <path d="M284 142H337" class="control" marker-end="url(#control)"/>
+  <rect x="348" y="109" width="340" height="67" rx="14" fill="#d7eae7"/>
+  <text x="518" y="138" class="node" text-anchor="middle">Web console</text>
+  <text x="518" y="160" class="detail" text-anchor="middle">Select and test a gateway</text>
+  <path d="M518 178V205H189" class="control"/>
+  <path d="M189 204V234" class="control" marker-end="url(#control)"/>
+  <path d="M518 204V234" class="control" marker-end="url(#control)"/>
+  <text x="32" y="222" class="section" text-anchor="start">Configuration</text>
+  <rect x="32" y="241" width="313" height="76" rx="14" fill="#e6eeeb"/>
+  <rect x="364" y="241" width="324" height="76" rx="14" fill="#e6eeeb"/>
+  <text x="188" y="273" class="node" text-anchor="middle">CLI / Python SDK</text>
+  <text x="188" y="298" class="detail" text-anchor="middle">Set proxy variables for an app</text>
+  <text x="526" y="273" class="node" text-anchor="middle">SSH / Docker</text>
+  <text x="526" y="298" class="detail" text-anchor="middle">Configure a node or container</text>
+  <path d="M526 319V342H116" class="control"/>
+  <path d="M188 319V342" class="control"/>
+  <path d="M116 342V379" class="control" marker-end="url(#control)"/>
+  <text x="32" y="364" class="section" text-anchor="start">Traffic</text>
+  <rect x="32" y="390" width="170" height="56" rx="14" fill="#d7eae7"/>
+  <rect x="264" y="390" width="190" height="56" rx="14" fill="#17645b"/>
+  <rect x="516" y="390" width="172" height="56" rx="14" fill="#d7eae7"/>
+  <text x="117" y="426" class="node" text-anchor="middle">Application</text>
+  <text x="359" y="426" class="highlight" text-anchor="middle">Existing proxy</text>
+  <text x="602" y="426" class="node" text-anchor="middle">Destination</text>
+  <path d="M209 418H251" class="traffic" marker-end="url(#traffic)"/>
+  <path d="M461 418H503" class="traffic" marker-end="url(#traffic)"/>
+</svg>

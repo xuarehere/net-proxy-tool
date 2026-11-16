@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0] - 2026-11-16
+
+### Added
+
+- Web-first setup for a user's own HTTP proxy. The first gateway becomes active on save. The request test distinguishes an unavailable TCP port from a failed request to the selected URL.
+- Portable distributions for Windows x64, macOS on Intel and Apple Silicon, and Linux on x64 and ARM64. The archives include a Python runtime.
+- Chinese and English setup guides, architecture diagrams and a screenshot of the first-run console.
+
+### Changed
+
+- The launcher waits for the local console to respond before opening the browser. It supports an explicit port, headless startup and stopping its own instance.
+- Web, CLI and SDK use the same configuration. `NET_PROXY_CONFIG` selects an explicit file, and existing application-directory configurations remain readable. New installations start with empty gateway and node lists.
+- CLI and SDK tasks use the selected HTTP gateway. SSH node provisioning preserves file snapshots and surfaces failed operations.
+- The console defaults to loopback, checks browser requests and redacts credentials in API responses. Docker Compose publishes the console on host loopback and keeps configuration in a named volume.
+
+中文升级说明见[配置与排障](docs/operations.md)。For configuration paths and upgrade instructions, see [Operations](docs/operations_en.md).
+
+---
+
 ## [1.3.0] - 2026-11-15
 
 ### 🚀 Industrial Operations, Deep Preflight & Live Container Integration (工业管控增强、深度预检与实机联调)
