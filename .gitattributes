@@ -1,0 +1,12 @@
+* text=auto
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sh text eol=lf
+*.py text eol=lf
+bin/with-proxy text eol=lf
+bin/with-proxy-docker text eol=lf
+bin/docker-proxy text eol=lf
+bin/proxy-on text eol=lf
+bin/proxy-off text eol=lf
+net-proxy-tool text eol=lf
+*.png binary

@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -x "$root/runtime/bin/python3" ]; then
+    exec "$root/runtime/bin/python3" "$root/launcher.py" "$@"
+fi
+exec python3 "$root/launcher.py" "$@"

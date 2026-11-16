@@ -1,38 +1,17 @@
-# net-proxy-tool: Linux session proxy activator
-# 必须使用 source 调用
-_TOOL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd || pwd)"
-_CONFIG_FILE="${_TOOL_DIR}/config.json"
-
-_PARSED=$(python3 -c "
-import json
-h, p, no = '127.0.0.1', 7890, 'localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,*.local'
-try:
-    with open('$_CONFIG_FILE', 'r', encoding='utf-8') as f:
-        d = json.load(f)
-        ag = d.get('active_gateway_id')
-        for g in d.get('gateways', []):
-            if g.get('id') == ag:
-                h = g.get('host', h)
-                p = g.get('port', p)
-                break
-        no = d.get('no_proxy', no)
-except Exception:
-    pass
-print(f'{h}:{p}|{no}')
-" 2>/dev/null || echo "127.0.0.1:7890|localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,*.local")
-
-_GW_URL="http://$(echo "$_PARSED" | cut -d'|' -f1)"
-_SOCKS_URL="socks5://$(echo "$_PARSED" | cut -d'|' -f1)"
-_NO_PROXY_LIST="$(echo "$_PARSED" | cut -d'|' -f2)"
-
-export http_proxy="${_GW_URL}"
-export https_proxy="${_GW_URL}"
-export HTTP_PROXY="${_GW_URL}"
-export HTTPS_PROXY="${_GW_URL}"
-export all_proxy="${_SOCKS_URL}"
-export ALL_PROXY="${_SOCKS_URL}"
-export no_proxy="${_NO_PROXY_LIST}"
-export NO_PROXY="${_NO_PROXY_LIST}"
-
-echo "✅ [net-proxy-tool] 当前终端会话代理已激活 (网关: ${_GW_URL})"
-unset _TOOL_DIR _CONFIG_FILE _PARSED _GW_URL _SOCKS_URL _NO_PROXY_LIST
+# Source this file in Bash to update the current session.
+source "$(dirname "${BASH_SOURCE[0]}")/python-env.sh" || return 1
+_npt_exports=$("$npt_python" "$npt_root/bin/session_env.py") || return 1
+if [[ -z ${_npt_active:-} ]]; then
+    _npt_restore=""
+    for _npt_key in http_proxy HTTP_PROXY https_proxy HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY; do
+        if [[ -n ${!_npt_key+x} ]]; then
+            printf -v _npt_value '%q' "${!_npt_key}"
+            _npt_restore+="export ${_npt_key}=${_npt_value};"
+        else
+            _npt_restore+="unset ${_npt_key};"
+        fi
+    done
+fi
+eval "$_npt_exports"
+_npt_active=1
+unset npt_python npt_root _npt_exports _npt_key _npt_value
