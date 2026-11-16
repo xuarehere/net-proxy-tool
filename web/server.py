@@ -795,12 +795,17 @@ echo "=================================================="
                         "message": f"🟢 宿主机已连通 ({rtt_or_err}ms)，且 Docker 容器【{container_name}】正在健康运行中！"
                     })
                 else:
+                    detail = res.stderr.strip().splitlines()[-1:] if res.stderr else []
+                    if res.returncode == 255:
+                        reason = "SSH 连接或密钥认证失败"
+                    elif res.returncode:
+                        reason = "无法检查容器，请核对名称及远程账号的 Docker 权限"
+                    else:
+                        reason = "目标容器已停止"
                     self.send_json({
-                        "success": False,
-                        "tcp_ok": True,
-                        "latency_ms": rtt_or_err,
-                        "auth_ok": False,
-                        "message": f"⚠️ 宿主机已连通，但未检测到运行中的容器【{container_name}】"
+                        "success": False, "tcp_ok": True, "latency_ms": rtt_or_err,
+                        "auth_ok": res.returncode != 255, "container_running": False,
+                        "message": reason + (" · " + detail[0][:300] if detail else ""),
                     })
             except Exception as e:
                 self.send_json({"success": False, "tcp_ok": True, "message": f"⚠️ 容器探测异常: {e}"})

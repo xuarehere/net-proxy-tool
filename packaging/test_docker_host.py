@@ -2,6 +2,7 @@
 import getpass
 import hashlib
 import os
+import re
 import socket
 import subprocess
 import tempfile
@@ -80,6 +81,7 @@ HostKey {host_key}
 PidFile {pidfile}
 AuthorizedKeysFile {authorized}
 StrictModes no
+UsePAM yes
 AuthenticationMethods publickey
 PasswordAuthentication no
 KbdInteractiveAuthentication no
@@ -88,7 +90,9 @@ AllowUsers {runner}
 DisableForwarding yes
 """, encoding="utf-8")
         invoke("sudo", "-n", "install", "-d", "-m", "0755", "/run/sshd")
-        invoke("sudo", "-n", "/usr/sbin/sshd", "-f", str(conf))
+        log = directory / "sshd.log"
+        log.touch(mode=0o600)
+        invoke("sudo", "-n", "/usr/sbin/sshd", "-f", str(conf), "-E", str(log))
         for _ in range(30):
             if pidfile.exists():
                 break
@@ -104,8 +108,17 @@ DisableForwarding yes
                     break
             except OSError:
                 time.sleep(0.3)
+        probe = ["docker", "exec", controller, "ssh", "-p", str(ssh_port),
+                 "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+                 f"{runner}@127.0.0.1", f"id && command -v docker && docker inspect -f '{{{{.State.Running}}}}' {target}"]
+        diagnostic = subprocess.run(probe, capture_output=True, text=True, timeout=15)
+        if diagnostic.returncode != 0:
+            details = diagnostic.stderr + log.read_text(encoding="utf-8", errors="replace")
+            raise RuntimeError("SSH fixture preflight failed: " +
+                               re.sub(r"SHA256:[a-zA-Z0-9+/=]+", "<key fingerprint>", details))
+        print(diagnostic.stdout.strip())
         preflight = api(port, "/api/test-node-preflight", node)
-        assert preflight.get("auth_ok"), preflight
+        assert preflight.get("auth_ok") and preflight.get("success"), preflight
         assert api(port, "/api/gateways/add", {"name": "test", "host": "127.0.0.1", "port": 17777})["success"]
         node["bound_gateway_id"] = api(port, "/api/config")["gateways"][0]["id"]
         assert api(port, "/api/clients/add", node)["success"]
