@@ -1010,6 +1010,7 @@ echo "=================================================="
             self.send_json({"success": False, "tcp_ok": False, "online": False, "http_ok": False,
                             "path_verified": False, "response_received": False, "request_url": url,
                             "final_url": url, "proxy_url": proxy, "code": None, "redirects": [],
+                            "tls_retries": 0, "tls_retry_reason": None,
                             "stage": "proxy_tcp", "error_type": "proxy_connection", "error": tcp_info})
             return
         result = check_http_target("HTTP probe", url, proxy)

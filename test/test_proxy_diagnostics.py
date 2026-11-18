@@ -58,6 +58,12 @@ class RecordingProxy(BaseHTTPRequestHandler):
 class HandshakeProxy(RecordingProxy):
     protocol_version = "HTTP/1.1"
 
+    def handle(self):
+        try:
+            super().handle()
+        except ConnectionResetError:
+            pass  # The probe deliberately closes a failed or redirected tunnel.
+
     def do_CONNECT(self):
         super().do_CONNECT()
         self.close_connection = False
