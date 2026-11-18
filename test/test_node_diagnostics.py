@@ -63,7 +63,7 @@ class NodeDiagnosticsTests(unittest.TestCase):
         worker.start()
         self.stack.callback(worker.join, 2)
         self.stack.callback(self.proxy.shutdown)
-        self.node = {'id': 'local', 'host': '127.0.0.1'}
+        self.node = {'id': 'local', 'host': '127.0.0.1', 'access_mode': 'local', 'identity_version': 1}
         self.gateway = {'id': 'selected', 'host': '127.0.0.1', 'port': self.proxy.server_port}
 
     def probe(self, suffix):

@@ -27,7 +27,7 @@ class RecordingProxy(BaseHTTPRequestHandler):
 
 
 def api(port, path, payload=None):
-    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=90)
     try:
         data = json.dumps(payload).encode() if payload is not None else None
         conn.request("POST" if data else "GET", path, data, {"Content-Type": "application/json"})

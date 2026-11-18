@@ -12,6 +12,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let step1Complete = false;
   let step2Complete = false;
   let step3Complete = false;
+  let wizardProbeRevision = 0;
 
   // Global DOM Elements
   const tabButtons = document.querySelectorAll(".nav-btn");
@@ -40,6 +41,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const wizardTestGwBtn = document.getElementById("wizard-test-gw-btn");
   const wizardSetDefaultGwBtn = document.getElementById("wizard-set-default-gw-btn");
   const step1Result = document.getElementById("step-1-result");
+  const wizardProbeActions = document.getElementById("wizard-probe-actions");
+  const readOnlyNode = document.getElementById("wizard-readonly-node");
+  const readOnlyTest = document.getElementById("wizard-readonly-test");
+  const readOnlyOutput = document.getElementById("wizard-readonly-output");
 
   const wizardClientSelect = document.getElementById("wizard-client-select");
   const wizardOpenAddClientBtn = document.getElementById("wizard-open-add-client-btn");
@@ -204,6 +209,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const setupUrl = document.getElementById("setup-url");
   const setupCommand = document.getElementById("setup-command");
   const setupTest = document.getElementById("setup-test");
+  const setupCompare = document.getElementById("setup-compare");
 
   function setupPayload() {
     return {name: setupName.value.trim(), host: setupHost.value.trim(), port: Number(setupPort.value), protocol: "http"};
@@ -288,33 +294,89 @@ document.addEventListener("DOMContentLoaded", () => {
     return "'" + value.replaceAll("'", windows ? "''" : "'\\''") + "'";
   }
 
-  function probeSummary(result) {
-    const rows = [result.tcp_ok == null ? "尚无 TCP 结果" : (result.tcp_ok ? "网关 TCP 已连接" : "网关 TCP 连接失败")];
-    if (result.tcp_ok) {
-      if (result.path_verified) rows.push("已验证代理路径");
-      if (result.online || result.http_ok) rows.push("代理请求成功");
-      else if (result.response_received) rows.push("已收到响应，目标请求未成功");
-      else rows.push("代理请求失败");
+  function gatewayGetCommand(gateway, target) {
+    const windows = navigator.platform.startsWith("Win");
+    const quote = value => quoteTarget(value, windows);
+    return (windows ? "curl.exe" : "curl") + " --disable --noproxy " + (windows ? "' '" : "''") +
+      " --proxy " + quote(gatewayAddress(gateway)) + " --location --max-redirs 5 --max-time 15" +
+      " --proto-redir " + quote(target.toLowerCase().startsWith("https:") ? "=https" : "=http,https") + " --url " + quote(target);
+  }
+
+  function probeConclusion(result) {
+    if (result.http_ok || result.online) return "代理请求成功 · 最终 HTTP " + result.code;
+    const phase = {validation: "目标地址校验", proxy_tcp: "网关 TCP 连接", proxy_tunnel: "代理 CONNECT",
+      tls: "TLS 握手", http_response: "等待目标响应", response_body: "读取响应内容"};
+    const final = result.final_url || result.request_url || result.url;
+    if (result.error_type === "timeout") {
+      return (phase[result.stage] || "请求") + "超时 · " + (final || "目标") + " 未返回最终 HTTP 响应";
     }
-    if (result.tls_retries) rows.push("首次 TLS 握手被中断，已重新连接一次");
-    if (result.code || result.first_status) rows.push(httpJourney(result));
-    if (result.response_received) rows.push([401, 403].includes(result.code) ? "访问被拒绝，账户权限未验证" : "账户登录与权限未验证");
-    if (result.latency_ms != null) rows.push(result.latency_ms + " ms");
-    const phase = {validation: "地址校验", proxy_tcp: "网关 TCP", proxy_tunnel: "代理 CONNECT",
-      tls: "TLS 握手", http_response: "目标响应"};
-    if (result.error_type) rows.push((phase[result.stage] || "请求") + " · " + result.error_type);
-    if (result.error) rows.push(result.error);
-    const redirects = result.redirects?.length || result.redirect_count;
-    if (redirects) rows.push("重定向 " + redirects + " 次");
-    const path = [result.proxy_url, result.request_url || result.url];
-    if (result.final_url && result.final_url !== path[1]) path.push(result.final_url);
-    return [rows.join(" · "), path.filter(Boolean).join(" → ")].filter(Boolean).join("\n");
+    if (result.stage === "proxy_tunnel" || ["proxy_tunnel", "proxy_auth"].includes(result.error_type)) {
+      return "代理" + (result.error_type === "proxy_auth" ? "要求身份验证" : "拒绝建立隧道") +
+        (result.code ? "（" + (result.stage === "proxy_tunnel" || result.connect_status === result.code ? "CONNECT " : "HTTP ") + result.code + "）" : "");
+    }
+    if (result.error_type?.startsWith("redirect_")) return result.error || "重定向未完成";
+    if (result.response_received && result.code) return "目标请求未成功 · HTTP " + result.code;
+    return (phase[result.stage] || "代理请求") + "失败" + (result.error ? " · " + result.error : "");
+  }
+
+  function probeEvidence(result) {
+    const rows = [];
+    if (result.proxy_url) rows.push("代理网关 · " + result.proxy_url);
+    const start = result.request_url || result.url;
+    if (start) rows.push("请求 · " + (result.method || "GET") + " " + start);
+    for (const attempt of result.attempts || []) {
+      const tls = {passed: "TLS 已验证", eof: "TLS 握手 EOF", timeout: "TLS 握手超时",
+        certificate_error: "TLS 证书验证失败", failed: "TLS 握手失败"};
+      const phases = [attempt.tcp_ok ? "网关 TCP 已连接" : "网关 TCP 未连接"];
+      if (attempt.connect_status != null) phases.push("CONNECT " + attempt.connect_status);
+      if (tls[attempt.tls]) phases.push(tls[attempt.tls]);
+      if (attempt.http_status != null) phases.push("HTTP " + attempt.http_status);
+      const redirect = (result.redirects || [])[attempt.hop - 1];
+      if (redirect && attempt.http_status === redirect.code) phases.push("跳转至 " + redirect.location);
+      rows.push("第 " + attempt.hop + " 跳" + (attempt.attempt > 1 ? "（重试）" : "") +
+        " · " + attempt.url + "\n" + phases.join(" · ") + " · " + attempt.elapsed_ms + " ms");
+    }
+    if (!result.attempts?.length && result.tcp_ok != null) rows.push("网关 TCP " + (result.tcp_ok ? "已连接" : "未连接"));
+    if (result.first_status != null || result.final_status != null) {
+      rows.push((result.first_status ? "首跳 HTTP " + result.first_status : "首跳状态未知") + " → " +
+        (result.final_status == null ? "未收到最终 HTTP 状态" : "最终 HTTP " + result.final_status));
+    }
+    if (result.tls_retries) rows.push("TLS 握手 EOF 后已重连一次");
+    if (result.final_url && result.final_url !== start) rows.push("最后尝试 · " + result.final_url);
+    if (result.latency_ms != null) rows.push("耗时 " + result.latency_ms + " ms" +
+      (result.budget_ms ? " · 整次请求预算 " + result.budget_ms / 1000 + " 秒" : ""));
+    if (result.error_type === "timeout" && result.budget_expired) rows.push("整次请求的时间预算已用完");
+    if (result.response_received) rows.push("账户登录与权限未验证");
+    return rows;
+  }
+
+  function probeSummary(result) {
+    return [probeConclusion(result), ...probeEvidence(result)].join("\n");
+  }
+
+  function renderProbe(element, result) {
+    const title = document.createElement("strong");
+    title.textContent = probeConclusion(result);
+    const details = document.createElement("details");
+    details.className = "probe-evidence";
+    const summary = document.createElement("summary");
+    summary.textContent = "查看逐跳证据";
+    const list = document.createElement("ol");
+    for (const row of probeEvidence(result)) {
+      const item = document.createElement("li");
+      item.textContent = row;
+      list.appendChild(item);
+    }
+    details.append(summary, list);
+    element.replaceChildren(title, details);
   }
 
   function clearSetupResult() {
     setupRevision++;
     setupResult.textContent = "";
     setupCommand.hidden = true;
+    setupCompare.hidden = true;
+    setupTest.disabled = false;
   }
 
   function selectSetupGateway(id) {
@@ -392,19 +454,16 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const data = await postJson("/api/test-gateway", {...gateway, target_url: target});
       if (revision !== setupRevision) return;
-      setupResult.textContent = probeSummary(data);
-      if (data.online) {
-        const windows = navigator.platform.startsWith("Win");
-        const quote = value => quoteTarget(value, windows);
-        setupCommand.textContent = (windows ? "curl.exe" : "curl") +
-          " --noproxy " + (windows ? "' '" : "''") + " --proxy " + quote(gatewayAddress(gateway)) +
-          " --location --url " + quote(data.request_url || target);
+      renderProbe(setupResult, data);
+      if (data.request_url) {
+        setupCommand.textContent = gatewayGetCommand(gateway, data.request_url);
         setupCommand.hidden = false;
+        setupCompare.hidden = !setupId || setupDirty;
       }
     } catch (error) {
       if (revision === setupRevision) setupResult.textContent = error.message;
     } finally {
-      setupTest.disabled = false;
+      if (revision === setupRevision) setupTest.disabled = false;
     }
   });
 
@@ -443,13 +502,21 @@ document.addEventListener("DOMContentLoaded", () => {
   // ==============================================================
   function resetWizard(keepGateway = false) {
     if (!keepGateway) {
+      wizardProbeRevision++;
+      wizardTestGwBtn.disabled = false;
+      wizardTestGwBtn.textContent = "探测该网关连通性";
+      wizardProbeActions.hidden = true;
+      readOnlyOutput.textContent = "";
       step1Complete = false;
       cardStep2.classList.add("locked-card");
       cardStep2.inert = true;
       pipeStep2.className = "pipeline-step locked";
       pipeStep1.className = "pipeline-step active";
       pipeStep1.querySelector(".pipe-num").textContent = "1";
+      pipeStep1.querySelector(".pipe-name").textContent = "校验代理网关";
+      statusTagStep1.className = "step-status-tag";
       statusTagStep1.textContent = "待验证";
+      step1Result.className = "step-result-banner";
       step1Result.textContent = "验证所选网关后可继续。";
     }
     step2Complete = false;
@@ -471,7 +538,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function nodeRequest(client) {
-    return {node_id: client.id, gateway_id: client.bound_gateway_id || "",
+    return {node_id: client.id, node_revision: client.node_revision ?? 0, gateway_id: client.bound_gateway_id || "",
       binding_revision: client.binding_revision || 0};
   }
 
@@ -492,6 +559,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function nodeCheckLines(check) {
     if (!check) return ["未执行"];
     const lines = [httpJourney(check)];
+    if (check.execution_context) lines.push("执行范围 · " + (check.execution_context === "fresh_login_shell" ? "独立登录 shell（按该账号启动配置）" : "本机控制台进程"));
     const transports = {local: "控制台本机", ssh: "SSH 节点", ssh_docker_exec: "SSH 宿主机上的目标容器"};
     if (transports[check.transport]) lines.push("执行位置 · " + transports[check.transport]);
     if (check.latency_ms != null) lines.push("请求耗时 · " + check.latency_ms + " ms");
@@ -542,12 +610,27 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const restoredProxyNote = "启用前已有的代理可能继续生效。可用普通 curl 复测当前路径。";
 
+  function restoredEnvironmentNote(verification) {
+    const env = verification?.restored_environment;
+    if (!env?.observed) return "";
+    const gateway = env.matched_gateway;
+    const context = verification.verified && verification.verification_scope === "login_and_managed_files"
+      ? "原登录环境" : "当前独立登录环境";
+    if (gateway) return `${context}仍有代理 · ${formatPeer(gateway.host, gateway.port)}（与已知网关吻合）`;
+    return env.proxy_present ? `${context}仍有代理（其他来源，地址未回显）` : `${context}未检测到代理变量（不代表所有应用直连）`;
+  }
+
   function nodeContext(result) {
     const check = result.ordinary_request || result.explicit_proxy || result;
     const enabled = result.is_proxy_enabled ?? check.is_proxy_enabled;
     const recorded = enabled == null ? "未知" : (enabled ? "已开启" : "已关闭");
+    const states = {enabled: "已核验开启", disabled: "已核验恢复原基线", unknown: "未核验"};
+    const verification = result.verification || {};
     return ["请求目标 · " + (check.target_url || result.target_url || "未知"),
-      "托管配置记录 · " + recorded, "公网出口 IP · 未核验"].join("\n");
+      "托管配置记录 · " + recorded,
+      "最近配置核验 · " + (states[result.managed_state] || states.unknown),
+      "核验范围 · " + ({login_and_managed_files: "独立登录环境与托管文件", managed_files_only: "原快照文件（不推定直连）", managed_files: "托管文件与执行身份"}[verification.verification_scope] || "尚未核验"),
+      restoredEnvironmentNote(verification), "公网出口 IP · 未核验"].filter(Boolean).join("\n");
   }
 
   function nodeProbeSummary(result) {
@@ -645,26 +728,24 @@ document.addEventListener("DOMContentLoaded", () => {
     const gateway = selectedWizardGateway;
     const target = wizardTestUrl.value.trim();
     resetWizard();
+    const revision = wizardProbeRevision;
     wizardTestGwBtn.disabled = true;
     wizardTestGwBtn.innerHTML = '<span class="btn-icon">⏳</span> 正在探测网关...';
     step1Result.className = "step-result-banner";
-    step1Result.innerHTML = '<span class="res-msg">正在测试与网关的端口连通性...</span>';
+    step1Result.textContent = "正在通过所选网关发送 GET 请求…";
 
     try {
-      const res = await fetch("/api/test-gateway", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          host: selectedWizardGateway.host,
-          port: selectedWizardGateway.port,
-          target_url: wizardTestUrl.value.trim()
-        })
-      });
-      const data = await res.json();
-      if (selectedWizardGateway?.id !== gateway.id || target !== wizardTestUrl.value.trim()) return;
+      const data = await postJson("/api/test-gateway", {...gateway, target_url: target});
+      if (revision !== wizardProbeRevision) return;
+      renderProbe(step1Result, data);
+      wizardProbeActions.hidden = false;
+      document.getElementById("wizard-probe-command").textContent = gatewayGetCommand(gateway, target);
+      const bound = (appConfig.clients || []).filter(client => client.bound_gateway_id === gateway.id);
+      readOnlyNode.replaceChildren(...bound.map(client => new Option(client.name, client.id)));
+      if (!bound.length) readOnlyNode.add(new Option("暂无已绑定节点", ""));
+      readOnlyNode.disabled = readOnlyTest.disabled = !bound.length;
       if (data.online) {
         step1Result.className = "step-result-banner success";
-        step1Result.textContent = probeSummary(data);
         statusTagStep1.className = "step-status-tag success";
         statusTagStep1.textContent = "✅ 已就绪";
         pipeStep1.className = "pipeline-step completed";
@@ -674,16 +755,35 @@ document.addEventListener("DOMContentLoaded", () => {
         unlockStep2();
       } else {
         step1Result.className = "step-result-banner error";
-        step1Result.textContent = probeSummary(data);
         statusTagStep1.className = "step-status-tag";
-        statusTagStep1.textContent = "❌ 连通失败";
+        statusTagStep1.textContent = "目标请求未成功";
       }
     } catch (err) {
+      if (revision !== wizardProbeRevision) return;
       step1Result.className = "step-result-banner error";
       step1Result.textContent = "请求异常：" + err.message;
     } finally {
-      wizardTestGwBtn.disabled = false;
-      wizardTestGwBtn.innerHTML = '<span class="btn-icon">⚡</span> 探测该网关连通性';
+      if (revision === wizardProbeRevision) {
+        wizardTestGwBtn.disabled = false;
+        wizardTestGwBtn.textContent = "重新测试同一 GET";
+      }
+    }
+  });
+
+  readOnlyNode.addEventListener("change", () => { readOnlyOutput.textContent = ""; });
+  readOnlyTest.addEventListener("click", async () => {
+    const node = appConfig.clients.find(client => client.id === readOnlyNode.value);
+    if (!node || node.bound_gateway_id !== selectedWizardGateway?.id) return;
+    const revision = wizardProbeRevision;
+    readOnlyNode.disabled = readOnlyTest.disabled = true;
+    readOnlyOutput.textContent = "正在从 " + node.name + " 发送只读请求…";
+    try {
+      const data = await postJson("/api/node-test", {...nodeRequest(node), target_url: wizardTestUrl.value.trim()});
+      if (revision === wizardProbeRevision) readOnlyOutput.textContent = node.name + "\n" + nodeProbeSummary(data);
+    } catch (error) {
+      if (revision === wizardProbeRevision) readOnlyOutput.textContent = error.message;
+    } finally {
+      if (revision === wizardProbeRevision) readOnlyNode.disabled = readOnlyTest.disabled = false;
     }
   });
 
@@ -723,11 +823,12 @@ document.addEventListener("DOMContentLoaded", () => {
     wizardConfirmClientBtn.disabled = true;
     try {
       const data = await postJson("/api/clients/update", {id: client.id, bound_gateway_id: gateway.id,
-        binding_revision: client.binding_revision || 0});
+        node_revision: client.node_revision ?? 0, binding_revision: client.binding_revision || 0});
       if (data.client?.bound_gateway_id !== gateway.id) throw new Error("服务未确认节点绑定，请重新加载。");
       await loadConfig();
       if (selectedWizardClient?.id !== client.id || selectedWizardGateway?.id !== gateway.id) return;
       if (selectedWizardClient.bound_gateway_id !== gateway.id ||
+          (selectedWizardClient.node_revision ?? 0) !== (data.client.node_revision ?? 0) ||
           (selectedWizardClient.binding_revision || 0) !== (data.client.binding_revision || 0)) {
         throw new Error("节点绑定已变化，请重新确认。");
       }
@@ -906,10 +1007,10 @@ document.addEventListener("DOMContentLoaded", () => {
     let title;
     if (osType === "windows") {
       title = "在 Windows 工具目录中运行单次代理请求";
-      command = ".\\bin\\with-proxy.cmd --gateway " + gw.id + " curl.exe -I --url " + quoteTarget(wizardTestUrl.value, true);
+      command = ".\\bin\\with-proxy.cmd --gateway " + gw.id + " curl.exe --location --url " + quoteTarget(wizardTestUrl.value, true);
     } else {
       title = "开启节点代理后，在目标工作站或容器内验证";
-      command = "curl -I --url " + quoteTarget(wizardTestUrl.value, false);
+      command = "curl --location --url " + quoteTarget(wizardTestUrl.value, false);
     }
     const card = document.createElement("div");
     card.className = "code-delivery-card";
@@ -934,24 +1035,30 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function isWindowsWorkstation(client) {
-    return client.os_type === "windows" && client.access_mode !== "docker_host" &&
-      ["localhost", "127.0.0.1", "::1", window.location.hostname].includes(client.host) &&
-      Number(client.port || 22) === 22 && !client.container_name;
+    return client.os_type === "windows" && client.access_mode === "local";
   }
 
-  function openGatewayRequest(gatewayId) {
+  function openGatewayRequest(gatewayId, target) {
     switchTab("tab-sandbox");
     sbGwOverrideSelect.value = gatewayId;
+    if (target) {
+      sbCmdInput.value = target;
+      sbCmdInput.dispatchEvent(new Event("input", {bubbles: true}));
+    }
     resetBusinessMetrics();
     sbCmdInput.focus();
   }
+
+  setupCompare.addEventListener("click", () => openGatewayRequest(setupId, setupUrl.value.trim()));
+  document.getElementById("wizard-compare").addEventListener("click", () =>
+    openGatewayRequest(selectedWizardGateway.id, wizardTestUrl.value.trim()));
 
   async function runWizardAction(action) {
     const client = selectedWizardClient;
     const gateway = selectedWizardGateway;
     if (!step3Complete || !client || client.bound_gateway_id !== gateway?.id) return;
     if (action === "on" && isWindowsWorkstation(client)) {
-      openGatewayRequest(gateway.id);
+      openGatewayRequest(gateway.id, wizardTestUrl.value.trim());
       return;
     }
     const buttons = [wizardBtnProxyOn, wizardBtnProxyOff, wizardBtnNodeTest];
@@ -1009,7 +1116,8 @@ document.addEventListener("DOMContentLoaded", () => {
   function showBusinessMetrics(data) {
     sbGwStatusVal.textContent = data.tcp_ok == null ? "尚无结果" : (data.tcp_ok ? "已连接" : "连接失败");
     sbGwRttSub.textContent = data.tcp_latency_ms != null ? data.tcp_latency_ms + " ms" : "";
-    sbDiagRateVal.textContent = data.code ? "HTTP " + data.code : "未收到响应";
+    const finalCode = data.final_status ?? (data.response_received ? data.code : null);
+    sbDiagRateVal.textContent = finalCode ? "HTTP " + finalCode : "未收到最终响应";
     sbDiagSummary.textContent = data.error || data.final_url || data.request_url || "";
   }
 
@@ -1069,8 +1177,9 @@ document.addEventListener("DOMContentLoaded", () => {
     return cachedClients.filter(c => {
       if (filterType === "docker" && c.os_type !== "docker") return false;
       if (filterType === "linux" && c.os_type === "docker") return false;
-      if (filterType === "proxy_on" && !c.is_proxy_enabled) return false;
-      if (filterType === "proxy_off" && c.is_proxy_enabled) return false;
+      if (filterType === "proxy_on" && c.managed_state !== "enabled") return false;
+      if (filterType === "proxy_off" && c.managed_state !== "disabled") return false;
+      if (filterType === "unknown" && ![undefined, "unknown"].includes(c.managed_state)) return false;
 
       if (!query) return true;
       const matchName = (c.name || "").toLowerCase().includes(query);
@@ -1086,9 +1195,9 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateNodeStatsBadge() {
     if (!nodeStatsBadge) return;
     const total = cachedClients.length;
-    const onCount = cachedClients.filter(c => c.is_proxy_enabled).length;
-    const offCount = total - onCount;
-    nodeStatsBadge.textContent = `共 ${total} 个节点 (${onCount} 已启用, ${offCount} 未启用)`;
+    const onCount = cachedClients.filter(c => c.managed_state === "enabled").length;
+    const offCount = cachedClients.filter(c => c.managed_state === "disabled").length;
+    nodeStatsBadge.textContent = `共 ${total} 个节点 (${onCount} 已核验开启, ${offCount} 已核验恢复, ${total - onCount - offCount} 未核验)`;
   }
 
   const nodeTargets = new Map();
@@ -1130,10 +1239,12 @@ document.addEventListener("DOMContentLoaded", () => {
     clientsToRender.forEach(c => {
       const boundGw = (appConfig.gateways || []).find(g => g.id === c.bound_gateway_id);
       const localWindows = isWindowsWorkstation(c);
-      const gwName = boundGw ? `${boundGw.name}` : (c.bound_gateway_id || "默认");
+      const gwName = boundGw ? `${boundGw.name}` : (c.bound_gateway_id || "未绑定（禁止开启）");
       const tagsHtml = (c.tags || []).map(t => `<span class="tag-badge">${escapeHtml(t)}</span>`).join("");
-      const isProxyOn = Boolean(c.is_proxy_enabled);
-      const isLocal = c.access_mode !== "docker_host" && ["127.0.0.1", "localhost", window.location.hostname].includes(c.host) && (c.port == 22 || !c.port) && !c.container_name;
+      const isProxyOn = Boolean(c.is_proxy_enabled || c.pending_action);
+      const verifiedState = c.managed_state || "unknown";
+      const stateLabel = {enabled: "已核验开启", disabled: "已核验恢复", unknown: "未核验"}[verifiedState] || "未核验";
+      const isLocal = c.access_mode === "local";
 
       let addrBadge = '<span class="addr-badge">SSH直连</span>';
       let addrRow = `<code>${escapeHtml(c.ssh_user || 'root')}@${escapeHtml(c.host)}:${c.port || 22}</code>`;
@@ -1172,14 +1283,15 @@ document.addEventListener("DOMContentLoaded", () => {
           <div style="font-size:11px;color:var(--text-dim);">${boundGw ? `HTTP 代理 :${boundGw.port}` : ''}</div>
         </td>
         <td>
-          <div class="status-capsule ${isProxyOn ? 'on' : 'off'}">
+          <div class="status-capsule ${verifiedState === 'enabled' ? 'on' : verifiedState === 'disabled' ? 'off' : 'unknown'}">
             <span class="capsule-indicator">
-              ${isProxyOn ? '<span class="pulse-dot"></span>记录开启' : '记录关闭'}
+              ${escapeHtml(stateLabel)}${c.identity_confirmation_required ? " · 请确认执行位置" : ""}
             </span>
             <button class="capsule-btn ${isProxyOn ? 'btn-turn-off' : 'btn-turn-on'}" data-action="toggle-client" data-id="${escapeHtml(c.id)}" data-action-type="${isProxyOn ? 'off' : 'on'}">
               ${localWindows ? '发送业务请求' : (isProxyOn ? '停止托管' : '⚡ 开启')}
             </button>
           </div>
+          ${c.managed_state === "disabled" ? `<div class="restoration-note">${escapeHtml(restoredEnvironmentNote(c.verification))}</div>` : ''}
         </td>
         <td style="text-align: right;">
           <div class="row-target"><select class="form-select" data-node-target aria-label="此节点探测目标"></select>
@@ -1194,6 +1306,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 <button class="dropdown-item" data-action="edit-client" data-id="${escapeHtml(c.id)}">✏️ 编辑参数</button>
                 <button class="dropdown-item" data-action="clone-client" data-id="${escapeHtml(c.id)}">📋 克隆节点</button>
                 <button class="dropdown-item" data-action="test-client" data-id="${escapeHtml(c.id)}" data-host="${escapeHtml(c.host)}" data-port="${c.port || 22}">⚡ 连通探测</button>
+                ${!localWindows ? `<button class="dropdown-item" data-action="restore-client" data-id="${escapeHtml(c.id)}" data-action-type="off">↩ 恢复启用前基线</button>` : ''}
                 <button class="dropdown-item danger" data-action="delete-client" data-id="${escapeHtml(c.id)}">🗑️ 删除节点</button>
               </div>
             </div>
@@ -1217,12 +1330,14 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // 绑定表格操作按钮
-    topClientsTbody.querySelectorAll("[data-action='toggle-client']").forEach(btn => {
+    topClientsTbody.querySelectorAll("[data-action='toggle-client'], [data-action='restore-client']").forEach(btn => {
       btn.addEventListener("click", async () => {
         const cid = btn.getAttribute("data-id");
         const actionType = btn.getAttribute("data-action-type");
         const client = appConfig.clients.find(item => item.id === cid);
         if (isWindowsWorkstation(client)) { openGatewayRequest(client.bound_gateway_id || activeGateway?.id || ""); return; }
+        if (actionType === "off" && !confirm(`恢复 ${client.name} 的启用前基线？原有代理可能继续生效。`)) return;
+        btn.disabled = true;
         btn.textContent = "⏳...";
         try {
           const res = await fetch("/api/node-switch", {
@@ -1236,12 +1351,15 @@ document.addEventListener("DOMContentLoaded", () => {
           const d = await res.json();
           if (d.success) {
             await loadConfig();
-            alert(actionType === "off" ? d.message + "\n" + restoredProxyNote : d.message);
+            alert(actionType === "off" ? [d.message, restoredEnvironmentNote(d.verification), restoredProxyNote].filter(Boolean).join("\n") : d.message);
           } else {
             alert("切换失败: " + d.error);
           }
         } catch (e) {
           alert("切换异常: " + e.message);
+        } finally {
+          await loadConfig();
+          btn.disabled = false;
         }
       });
     });
@@ -1292,18 +1410,21 @@ document.addEventListener("DOMContentLoaded", () => {
     topClientsTbody.querySelectorAll("[data-action='delete-client']").forEach(btn => {
       btn.addEventListener("click", async () => {
         const cid = btn.getAttribute("data-id");
-        if (!confirm(`确定要从拓扑池中删除节点 "${cid}" 吗？`)) return;
+        const client = cachedClients.find(item => item.id === cid);
+        if (!client) return;
+        if (!confirm(`停止托管并删除节点 "${cid}"？\n已有托管先恢复并独立核验，失败将保留登记。删除会移除认证资料，仅保留加回所需非敏感信息。`)) return;
         try {
           const res = await fetch("/api/clients/delete", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: cid })
+            body: JSON.stringify({ id: cid, node_revision: client.node_revision ?? 0 })
           });
           const d = await res.json();
           if (d.success) {
             await loadConfig();
           } else {
-            alert("删除失败: " + d.error);
+            await loadConfig();
+            alert("删除未完成，登记保留: " + (d.error || d.message));
           }
         } catch (e) {
           alert("删除异常: " + e.message);
@@ -1358,38 +1479,43 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 一键全部开启出海
   topEnableAllBtn?.addEventListener("click", async () => {
-    if (!confirm("⚡ 确定要一键开启列表中所有节点的出海代理吗？")) return;
+    const selected = filterClientsList();
+    if (!selected.length || !confirm(`开启当前显示的 ${selected.length} 个节点？每个节点必须保存自己的网关绑定。`)) return;
+    const selections = selected.map(nodeRequest);
     topEnableAllBtn.disabled = true;
     topEnableAllBtn.innerHTML = '<span class="btn-icon">⏳</span> 正在批量下发...';
     try {
       const res = await fetch("/api/nodes/batch-switch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "on" })
+        body: JSON.stringify({ action: "on", nodes: selections })
       });
       const d = await res.json();
       await loadConfig();
-      alert(d.message || "已开通所有节点出海");
+      alert([d.message || d.error || "操作未完成", ...(d.results || []).filter(item => !item.success).map(item => item.name + " · " + item.error)].join("\n"));
     } catch (e) {
       alert("批量下发异常: " + e.message);
     } finally {
       topEnableAllBtn.disabled = false;
-      topEnableAllBtn.innerHTML = '<span class="btn-icon">⚡</span> 一键全部出海';
+      topEnableAllBtn.innerHTML = '<span class="btn-icon">⚡</span> 开启当前列表';
     }
   });
 
   // 按各节点的启用前快照批量恢复
   topDisableAllBtn?.addEventListener("click", async () => {
-    if (!confirm("确定停止全部节点的代理托管吗？\n将按快照恢复各节点启用前的配置，原有代理可能继续生效。如有冲突，请核对操作结果和目标文件。")) {
+    const selected = filterClientsList();
+    if (!selected.length) return;
+    const selections = selected.map(nodeRequest);
+    if (!confirm(`恢复当前显示的 ${selected.length} 个节点的启用前基线？原有代理可能继续生效；失败节点会保留登记。`)) {
       return;
     }
     topDisableAllBtn.disabled = true;
-    topDisableAllBtn.innerHTML = '<span class="btn-icon">⏳</span> 正在全局切断...';
+    topDisableAllBtn.innerHTML = '<span class="btn-icon">⏳</span> 正在逐节点恢复...';
     try {
       const res = await fetch("/api/nodes/batch-switch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "off" })
+        body: JSON.stringify({ action: "off", nodes: selections })
       });
       const d = await res.json();
       await loadConfig();
@@ -1400,7 +1526,7 @@ document.addEventListener("DOMContentLoaded", () => {
       alert("切断异常: " + e.message);
     } finally {
       topDisableAllBtn.disabled = false;
-      topDisableAllBtn.innerHTML = '<span class="btn-icon">🛑</span> 停止全部节点托管';
+      topDisableAllBtn.innerHTML = '<span class="btn-icon">🛑</span> 恢复当前列表';
     }
   });
 
@@ -1590,8 +1716,9 @@ document.addEventListener("DOMContentLoaded", () => {
         if (sectionAccessDockerHost) sectionAccessDockerHost.style.display = "none";
       } else {
         if (sectionAccessSsh) sectionAccessSsh.style.display = "none";
-        if (sectionAccessDockerHost) sectionAccessDockerHost.style.display = "block";
+        if (sectionAccessDockerHost) sectionAccessDockerHost.style.display = mode === "docker_host" ? "block" : "none";
       }
+      if (mode === "local") formClientHint.textContent = "本机模式使用运行控制台的账号；SSH 身份不会用于本机命令。";
     });
   }
 
@@ -1635,10 +1762,13 @@ document.addEventListener("DOMContentLoaded", () => {
   function openClientModal(mode, cid = null) {
     const edited = appConfig.clients.find(client => client.id === cid);
     formClientMode.dataset.bindingRevision = edited?.binding_revision || 0;
+    formClientMode.dataset.nodeRevision = edited?.node_revision || 0;
+    formClientMode.dataset.legacyLocalHost = edited?.identity_confirmation_required ? edited.host : "";
     formClientHint.textContent = "";
 
     // 填充网关下拉框
     formClientGw.innerHTML = "";
+    formClientGw.add(new Option("未绑定（保存后再选择开启）", ""));
     (appConfig.gateways || []).forEach(g => {
       const opt = document.createElement("option");
       opt.value = g.id;
@@ -1682,6 +1812,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
           formClientTags.value = (target.tags || []).join(", ");
           formClientDesc.value = target.description || "";
+          formClientAccessMode.dispatchEvent(new Event("change"));
+          formClientHint.textContent = "请修改执行地址或身份；相同执行身份会保留原登记，密码需重新输入。";
           modalClient.style.display = "flex";
           return;
         }
@@ -1742,6 +1874,8 @@ document.addEventListener("DOMContentLoaded", () => {
       formClientDesc.value = target.description || "";
     }
 
+    formClientAccessMode.dispatchEvent(new Event("change"));
+    if (edited?.identity_confirmation_required) formClientHint.textContent = "旧记录曾按本机执行。请先选择本机模式保存并恢复基线，再迁移到 SSH。";
     modalClient.style.display = "flex";
   }
 
@@ -1752,7 +1886,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // 深度全链路预检主机
   modalClientTestBtn.addEventListener("click", async () => {
     const accessMode = formClientAccessMode ? formClientAccessMode.value : "ssh";
-    const host = formClientHost.value.trim();
+    const host = accessMode === "local" ? "localhost" : formClientHost.value.trim();
     const port = Number((accessMode === "docker_host" ? formClientHostPort.value : formClientPort.value) || 22);
     const osType = formClientOs ? formClientOs.value : "linux";
     const authType = formClientAuthType ? formClientAuthType.value : "key";
@@ -1787,6 +1921,7 @@ document.addEventListener("DOMContentLoaded", () => {
         body: JSON.stringify({
           host,
           port,
+          node_id: formClientMode.value === "edit" ? formClientId.value : undefined,
           os_type: osType,
           access_mode: accessMode,
           auth_type: authType,
@@ -1832,7 +1967,12 @@ document.addEventListener("DOMContentLoaded", () => {
     let containerName = undefined;
     let sshHost = undefined;
 
-    if (accessMode === "docker_host") {
+    if (accessMode === "local") {
+      host = formClientMode.dataset.legacyLocalHost || "localhost";
+      port = 22;
+      sshUser = formClientSshUser.value.trim();
+      if (!name) { formClientHint.textContent = "请填写节点名称"; return; }
+    } else if (accessMode === "docker_host") {
       host = formClientSshHost ? formClientSshHost.value.trim() : "";
       containerName = formClientContainer ? formClientContainer.value.trim() : "";
       sshHost = host;
@@ -1866,6 +2006,8 @@ document.addEventListener("DOMContentLoaded", () => {
       os_type: osType,
       bound_gateway_id: boundGw,
       binding_revision: mode === "edit" ? Number(formClientMode.dataset.bindingRevision || 0) : undefined,
+      node_revision: mode === "edit" ? Number(formClientMode.dataset.nodeRevision || 0) : undefined,
+      confirm_execution_mode: mode === "edit",
       access_mode: accessMode,
       auth_type: authType,
       ssh_user: sshUser,
@@ -1894,7 +2036,8 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       } else {
         formClientHint.style.color = "var(--danger)";
-        formClientHint.textContent = `❌ ${data.error}`;
+        formClientHint.textContent = `❌ ${data.error}${mode === "edit" ? "。请关闭并重新打开编辑，核对最新记录后重试。" : ""}`;
+        await loadConfig();
       }
     } catch (e) {
       formClientHint.style.color = "var(--danger)";
@@ -2066,6 +2209,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 绑定开发者手册中的复制按钮
   attachCopyButtons(document.getElementById("tab-handbook"));
+  attachCopyButtons(wizardProbeActions);
 
   function escapeHtml(str) {
     if (!str) return "";

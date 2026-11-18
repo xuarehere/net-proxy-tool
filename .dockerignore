@@ -11,7 +11,10 @@ web/**
 !web/__init__.py
 !web/server.py
 !web/ssh_askpass.py
+!web/node_baseline.py
 !web/node_probe.py
+!web/session_switch.sh
+!web/container_helpers.sh
 !web/provision.sh
 !web/static/
 web/static/**

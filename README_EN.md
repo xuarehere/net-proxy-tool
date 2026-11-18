@@ -6,15 +6,17 @@
 
 Use a local Web console to route a command, a Python task or a selected remote node through an existing HTTP proxy. Test a request in the browser before choosing which workloads should use the gateway.
 
+Gateway tests show the selected site’s final response or the host where the request stopped. When you disable a worker, the console checks its restored settings against the account’s original login environment.
+
 ## Download and open the console
 
-| System | Download v1.4.2 | Start after extracting |
+| System | Download v1.4.3 | Start after extracting |
 | --- | --- | --- |
-| Windows | [x64 · ZIP](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.2/net-proxy-tool-windows-x64.zip) | `Start.bat` |
-| macOS | [Apple Silicon · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.2/net-proxy-tool-macos-arm64.tar.gz) | `./net-proxy-tool` |
-| macOS | [Intel · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.2/net-proxy-tool-macos-x64.tar.gz) | `./net-proxy-tool` |
-| Linux · glibc | [x86_64 · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.2/net-proxy-tool-linux-x64.tar.gz) | `./net-proxy-tool` |
-| Linux · glibc | [ARM64 · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.2/net-proxy-tool-linux-arm64.tar.gz) | `./net-proxy-tool` |
+| Windows | [x64 · ZIP](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.3/net-proxy-tool-windows-x64.zip) | `Start.bat` |
+| macOS | [Apple Silicon · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.3/net-proxy-tool-macos-arm64.tar.gz) | `./net-proxy-tool` |
+| macOS | [Intel · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.3/net-proxy-tool-macos-x64.tar.gz) | `./net-proxy-tool` |
+| Linux · glibc | [x86_64 · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.3/net-proxy-tool-linux-x64.tar.gz) | `./net-proxy-tool` |
+| Linux · glibc | [ARM64 · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.3/net-proxy-tool-linux-arm64.tar.gz) | `./net-proxy-tool` |
 
 The release checks run the downloaded packages on Windows x64, macOS 15 (Intel and Apple Silicon), Ubuntu 24.04 (x64 and ARM64), plus clean Ubuntu 22.04/24.04 and Debian 12 x64 containers. For Alpine/musl, use [Docker Compose](docs/operations_en.md).
 
@@ -22,7 +24,7 @@ The release checks run the downloaded packages on Windows x64, macOS 15 (Intel a
 2. In the browser, enter the **host and HTTP or mixed port** of a running proxy, then save it. Use `127.0.0.1` when the proxy client runs on the same computer. Read the port from that client's settings.
 3. Click **发送代理请求** (Send proxy request). A successful HTTP status from your target completes the first request.
 
-For checksums, source installation, shutdown and port conflicts, see the [quick start](QUICKSTART_EN.md). [Release assets and checksums](https://github.com/xuarehere/net-proxy-tool/releases/tag/v1.4.2)
+For checksums, source installation, shutdown and port conflicts, see the [quick start](QUICKSTART_EN.md). [Release assets and checksums](https://github.com/xuarehere/net-proxy-tool/releases/tag/v1.4.3)
 
 Choose Google, Claude, ChatGPT, YouTube, Gemini or a custom URL in the worker pool. The two probes show the node, selected target, initial response, final HTTP status and observed peer.
 

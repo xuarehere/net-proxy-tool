@@ -6,15 +6,17 @@
 
 通过本机 Web 控制台，把一个命令、Python 任务或指定的远程节点接到你已有的 HTTP 代理。可以先在浏览器里验证代理能否访问目标网站，再决定哪些任务使用它。
 
+网关测试显示所选网站的最终响应；中途跳转或 TLS 超时会标出失败站点。节点关闭后，控制台对照开启前的账号环境核验恢复结果。
+
 ## 下载并打开控制台
 
-| 系统 | 下载 v1.4.2 | 解压后启动 |
+| 系统 | 下载 v1.4.3 | 解压后启动 |
 | --- | --- | --- |
-| Windows | [x64 · ZIP](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.2/net-proxy-tool-windows-x64.zip) | `Start.bat` |
-| macOS | [Apple Silicon · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.2/net-proxy-tool-macos-arm64.tar.gz) | `./net-proxy-tool` |
-| macOS | [Intel · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.2/net-proxy-tool-macos-x64.tar.gz) | `./net-proxy-tool` |
-| Linux · glibc | [x86_64 · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.2/net-proxy-tool-linux-x64.tar.gz) | `./net-proxy-tool` |
-| Linux · glibc | [ARM64 · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.2/net-proxy-tool-linux-arm64.tar.gz) | `./net-proxy-tool` |
+| Windows | [x64 · ZIP](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.3/net-proxy-tool-windows-x64.zip) | `Start.bat` |
+| macOS | [Apple Silicon · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.3/net-proxy-tool-macos-arm64.tar.gz) | `./net-proxy-tool` |
+| macOS | [Intel · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.3/net-proxy-tool-macos-x64.tar.gz) | `./net-proxy-tool` |
+| Linux · glibc | [x86_64 · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.3/net-proxy-tool-linux-x64.tar.gz) | `./net-proxy-tool` |
+| Linux · glibc | [ARM64 · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.4.3/net-proxy-tool-linux-arm64.tar.gz) | `./net-proxy-tool` |
 
 发行测试运行于 Windows x64、macOS 15（Intel 和 Apple Silicon）、Ubuntu 24.04（x64 和 ARM64），并覆盖 Ubuntu 22.04、24.04 与 Debian 12 的干净 x64 容器。Alpine/musl 环境可使用 [Docker Compose](docs/operations.md)。
 
@@ -22,7 +24,7 @@
 2. 浏览器打开本地控制台。填写已有代理的**主机和 HTTP 或混合端口**，然后保存。代理客户端若运行在同一台电脑上，主机通常填 `127.0.0.1`；端口请从客户端设置中读取。
 3. 点击**发送代理请求**。检查实际使用的网关、跳转后的网址和最终状态码。要在远端执行同样的请求，请到节点池选择节点并保存它的网关绑定。
 
-只有源码或已有 Python？源码启动、校验和、停止服务和端口冲突的处理见[快速上手](QUICKSTART.md)。[所有发布包与校验文件](https://github.com/xuarehere/net-proxy-tool/releases/tag/v1.4.2)
+只有源码或已有 Python？源码启动、校验和、停止服务和端口冲突的处理见[快速上手](QUICKSTART.md)。[所有发布包与校验文件](https://github.com/xuarehere/net-proxy-tool/releases/tag/v1.4.3)
 
 在**拓扑与节点管理 → 目标业务节点池**选择 Google、Claude、ChatGPT、YouTube、Gemini 或自己的网址。核对节点和账号，再查看首跳、最终 HTTP 状态和实际对端。Google 有时先返回 302；页面会继续跟随跳转。
 

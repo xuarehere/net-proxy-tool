@@ -90,12 +90,12 @@ class WebApiTests(IsolatedTest):
                 node = {"id": "n1", "name": "fixture", "host": "node.example",
                         "bound_gateway_id": "gw", "os_type": "linux", "ssh_user": "tester"}
                 self.assertTrue(api("/api/clients/add", node)["success"])
-                self.assertTrue(api("/api/clients/update", {"id": "n1", "name": "updated"})["success"])
+                self.assertTrue(api("/api/clients/update", {"id": "n1", "name": "updated", "node_revision": 0})["success"])
                 with patch("web.server.apply_node_proxy", return_value={"returncode": 0}) as dispatch:
-                    self.assertTrue(api("/api/node-switch", {"node_id": "n1", "action": "on"})["success"])
-                    self.assertTrue(api("/api/nodes/batch-switch", {"action": "off"})["success"])
+                    self.assertTrue(api("/api/node-switch", {"node_id": "n1", "action": "on", "node_revision": 1, "gateway_id": "gw"})["success"])
+                    self.assertTrue(api("/api/nodes/batch-switch", {"action": "off", "nodes": [{"node_id": "n1", "node_revision": 2}]})["success"])
                     self.assertEqual(dispatch.call_count, 2)
-                self.assertTrue(api("/api/clients/delete", {"id": "n1"})["success"])
+                self.assertTrue(api("/api/clients/delete", {"id": "n1", "node_revision": 3})["success"])
                 self.assertTrue(api("/api/audit-logs")["logs"])
             finally:
                 server.shutdown()

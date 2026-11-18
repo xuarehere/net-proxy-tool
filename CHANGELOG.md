@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.3]
+
+- The gateway wizard reports the final HTTPS outcome separately from TCP, proxy CONNECT and redirects. A TLS timeout after a redirect shows the failing host and leaves the final HTTP status empty.
+- Node activation records the execution identity and a fresh login baseline. On disable, the console compares restored files and the login environment with that baseline. An existing proxy can remain active after restoration.
+- Node changes carry a revision. Restoring an active node precedes deletion or a change of execution identity. Batch operations act on an explicit selection.
+- 保留原配置并停止旧控制台后升级；首次操作旧节点时核对实际执行账号。关闭后可在新 SSH 登录中对照原代理环境。[中文排障](docs/operations.md) · [English guide](docs/operations_en.md)
+
 ## [1.4.2]
 
 - Worker Nodes Pool probes the selected URL on the target account. Google is the default, alongside Claude, ChatGPT, YouTube, Gemini and custom URLs. Existing customized diagnostic lists are preserved.

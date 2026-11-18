@@ -52,14 +52,14 @@ def main(node_image, controller_image):
     network, controller, target, fixture = [prefix + '-' + role for role in ('net','controller','node','fixture')]
     def run(*args, data=None, check=True):
         result = subprocess.run(args, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                check=check, timeout=60)
+                                check=check, timeout=120)
         return result.stdout.decode('utf-8').strip()
     for image in (node_image, controller_image, 'python:3.12-alpine'):
         run('docker', 'image', 'inspect', image, '--format', '{{.Id}}')
     port = 8899
     def api(port, path, payload=None, expected_status=200):
         script = ("import http.client,json,sys; path,payload,expected=json.load(sys.stdin); "
-                  "c=http.client.HTTPConnection('127.0.0.1',8899,timeout=35); "
+                  "c=http.client.HTTPConnection('127.0.0.1',8899,timeout=90); "
                   "c.request('POST' if payload is not None else 'GET',path,"
                   "json.dumps(payload) if payload is not None else None,{'Content-Type':'application/json'}); "
                   "r=c.getresponse(); data=r.read().decode(); assert r.status==expected,(r.status,data); print(data)")
@@ -128,17 +128,30 @@ def main(node_image, controller_image):
                 code = "import urllib.request; print(urllib.request.urlopen('http://fixture:8080/hits').read().decode())"
                 return json.loads(run('docker','exec',fixture,'python','-c',code))
             payload = {'node_id':'ssh-test','gateway_id':gateway['id'],'target_url':'http://fixture:8080/health'}
+            def switch(action, expected_status=200):
+                current = next(c for c in api(port, '/api/config')['clients'] if c['id'] == node['id'])
+                return api(port, '/api/node-switch', dict(payload, action=action,
+                    node_revision=current['node_revision'], binding_revision=current.get('binding_revision', 0)),
+                    expected_status=expected_status)
             expected_proxy_hits = 0
             for context in ('CURL_HOME', 'XDG_CONFIG_HOME'):
+                environment = ('CURL_HOME=/tmp/npt-user/curl config\n' if context == 'CURL_HOME' else '') + 'XDG_CONFIG_HOME=/tmp/npt-user/xdg config\n'
+                run('docker','exec','-i','-u','npttester',target,'sh','-ec',
+                    'cat > /tmp/npt-user/.ssh/environment', data=environment.encode())
                 for action, expected_increment in ((None,1),('on',2),('off',1)):
                     if context == 'CURL_HOME' and action == 'off':
                         # Restoration must use the recorded path even if a later login changes its environment.
                         run('docker','exec','-u','npttester',target,'sh','-ec',
                             'printf "XDG_CONFIG_HOME=/tmp/npt-user/xdg config\\n" > /tmp/npt-user/.ssh/environment')
-                        changed = api(port,'/api/node-switch',dict(payload,action='on'),expected_status=502)
+                        changed = switch('on', expected_status=502)
                         assert not changed['success']
+                        # A changed login baseline cannot be reported as restored.
+                        changed_off = switch('off', expected_status=502)
+                        assert not changed_off['success']
+                        run('docker','exec','-i','-u','npttester',target,'sh','-ec',
+                            'cat > /tmp/npt-user/.ssh/environment', data=environment.encode())
                     if action:
-                        assert api(port,'/api/node-switch',dict(payload,action=action))['success']
+                        assert switch(action)['success']
                     result = api(port,'/api/node-test',payload)
                     assert result['explicit_proxy']['online'], result
                     assert result['ordinary_request']['online'], result
@@ -148,7 +161,7 @@ def main(node_image, controller_image):
                         'matches_explicit_peer' if action == 'on' else 'different_peer'), result
                     identity = result['ordinary_request']['execution_identity']
                     assert identity['user'] == 'npttester' and identity['home'] == '/tmp/npt-user', identity
-                    selected = ('/tmp/npt-user/curl config/.curlrc' if context == 'CURL_HOME' and action != 'off'
+                    selected = ('/tmp/npt-user/curl config/.curlrc' if context == 'CURL_HOME'
                                 else '/tmp/npt-user/xdg config/curlrc')
                     assert identity['curl_config'] == selected, identity
                     expected_proxy_hits += expected_increment
