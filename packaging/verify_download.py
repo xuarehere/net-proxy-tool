@@ -11,6 +11,7 @@ from pathlib import Path
 
 from macos_gatekeeper import report as gatekeeper_report
 from smoke import run
+from test_https_release import run as verify_https
 
 
 def download(url, destination):
@@ -51,6 +52,7 @@ def main():
             with tarfile.open(archive) as package:
                 package.extractall(directory, filter="data")
         run(directory / "net-proxy-tool", browser=True)
+        verify_https(directory / "net-proxy-tool")
         gatekeeper_report(directory / "net-proxy-tool")
 
 

@@ -20,6 +20,7 @@ import shlex
 import shutil
 import threading
 import socket
+import ssl
 import stat
 import subprocess
 import sys
@@ -35,7 +36,7 @@ STATIC_DIR = WEB_DIR / "static"
 if __package__ in (None, ""):
     sys.path.insert(0, str(TOOL_DIR))
 
-from sdk.config import data_dir, load_config, resolve_gateway_info, save_config
+from sdk.config import VERSION, data_dir, load_config, resolve_gateway_info, save_config
 
 CONFIG_WRITE_LOCK = threading.RLock()
 
@@ -123,7 +124,64 @@ def check_tcp_port(host: str, port: int, timeout: float = 1.5):
         return False, str(e)
 
 
-def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 4.5):
+def diagnostic_url(value):
+    if not isinstance(value, str) or len(value) > 8192 or re.search(r"[\x00-\x20\x7f]", value):
+        raise ValueError("请输入无空格和控制字符的 HTTP(S) URL")
+    target = urllib.parse.urlsplit(value)
+    if (target.scheme not in ("http", "https") or not target.hostname
+            or target.username is not None or target.password is not None):
+        raise ValueError("目标必须是无凭据的 HTTP 或 HTTPS URL")
+    if target.port is not None and not 1 <= target.port <= 65535:
+        raise ValueError("目标端口必须在 1 至 65535 之间")
+    return target._replace(fragment="")
+
+
+def diagnostic_command(payload):
+    """Parse an HTTP GET description without invoking a shell or executable."""
+    if payload.get("target_url") and payload.get("command"):
+        raise ValueError("请提供 target_url 或请求文本中的一个")
+    text = payload.get("target_url") or payload.get("command", "")
+    if not isinstance(text, str):
+        raise ValueError("请求必须是 URL 或 curl GET 文本")
+    text = text.strip()
+    if re.search(r"\$\(|\$\{|\x60", text):
+        raise ValueError("请求中不支持 shell 插值，请提供完整 URL")
+    if text.startswith(("http://", "https://")):
+        return {"url": urllib.parse.urlunsplit(diagnostic_url(text)), "method": "GET"}
+    if "\n" in text or "\r" in text:
+        raise ValueError("请求必须为单行")
+    args = shlex.split(text, posix=True)
+    if not args or args.pop(0).lower() not in ("curl", "curl.exe"):
+        raise ValueError("此面板仅接受 HTTP(S) URL 或 curl GET 请求；其他业务命令请使用 CLI")
+    urls = []
+    method = "GET"
+    options = {"-s", "-S", "-sS", "-L", "--silent", "--show-error", "--location"}
+    while args:
+        arg = args.pop(0)
+        if arg in options:
+            continue
+        if arg in ("-I", "--head"):
+            method = "HEAD"
+            continue
+        if arg in ("-X", "--request"):
+            if not args or args[0] not in ("GET", "HEAD"):
+                raise ValueError("仅支持 GET 或 HEAD 请求")
+            method = args.pop(0)
+            continue
+        if arg in ("--url", "--"):
+            if len(args) != 1:
+                raise ValueError("请求必须包含一个 URL")
+            urls.append(args.pop())
+        elif arg.startswith(("http://", "https://")):
+            urls.append(arg)
+        else:
+            raise ValueError("仅接受 URL、GET/HEAD 和 -s / -S / -L 显示选项")
+    if len(urls) != 1:
+        raise ValueError("请求必须包含一个 URL")
+    return {"url": urllib.parse.urlunsplit(diagnostic_url(urls[0])), "method": method}
+
+
+def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 15.0, include_preview=False):
     if isinstance(target_info, dict):
         url = target_info.get("url", "")
         desc = target_info.get("desc", "")
@@ -134,39 +192,189 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 4
         category = ""
 
     started = time.monotonic()
-    result = {"name": name, "url": url, "desc": desc, "category": category, "status": "offline"}
+    result = {"name": name, "url": url, "request_url": url, "final_url": url,
+              "desc": desc, "category": category, "status": "offline", "proxy_url": proxy_url,
+              "tcp_ok": False, "path_verified": False, "response_received": False,
+              "http_ok": False, "redirects": [], "code": None, "error_type": None,
+              "tls_retries": 0, "tls_retry_reason": None}
     conn = None
+    stage = "validation"
+
+    def remaining_time():
+        remaining = timeout - (time.monotonic() - started)
+        if remaining <= 0:
+            raise TimeoutError("代理请求超过总超时")
+        return remaining
+
     try:
-        target = urllib.parse.urlsplit(url)
+        target = diagnostic_url(url)
         proxy = urllib.parse.urlsplit(proxy_url)
-        if target.scheme not in ("http", "https") or not target.hostname or target.username or target.password:
-            raise ValueError("目标必须是无凭据的 HTTP 或 HTTPS URL")
-        # Connect to the explicit proxy even for localhost and when NO_PROXY is set.
-        if target.scheme == "https":
-            conn = http.client.HTTPSConnection(proxy.hostname, proxy.port, timeout=timeout)
-            conn.set_tunnel(target.hostname, target.port or 443)
-            path = urllib.parse.urlunsplit(("", "", target.path or "/", target.query, ""))
-        else:
-            conn = http.client.HTTPConnection(proxy.hostname, proxy.port, timeout=timeout)
-            path = urllib.parse.urlunsplit(target._replace(fragment=""))
-        conn.request("GET", path, headers={"Host": target.netloc, "User-Agent": "net-proxy-tool/1.4"})
-        response = conn.getresponse()
-        result["code"] = response.status
-        if 200 <= response.status < 300:
-            result["status"] = "online"
-        else:
-            result["error"] = f"HTTP {response.status} {response.reason}"
+        if (proxy.scheme != "http" or not proxy.hostname
+                or proxy.username is not None or proxy.password is not None):
+            raise ValueError("请使用无凭据的 HTTP 代理入口")
+        seen = set()
+        for hop in range(6):
+            current = urllib.parse.urlunsplit(target)
+            result.update(final_url=current, code=None, response_received=False)
+            if current in seen:
+                result.update(error_type="redirect_loop", error="目标出现重定向循环")
+                break
+            seen.add(current)
+            for _ in range(2):
+                remaining = remaining_time()
+                # Every hop and TLS retry uses the selected proxy and the same deadline.
+                stage = "proxy_tcp"
+                conn = http.client.HTTPConnection(proxy.hostname, proxy.port, timeout=remaining)
+                if target.scheme == "https":
+                    conn.set_tunnel(target.hostname, target.port or 443)
+                    conn.sock = socket.create_connection((proxy.hostname, proxy.port or 80), remaining)
+                else:
+                    conn.connect()
+                result["tcp_ok"] = True
+                if target.scheme == "https":
+                    stage = "proxy_tunnel"
+                    conn.sock.settimeout(remaining_time())
+                    conn._tunnel()
+                    result["path_verified"] = True
+                    stage = "tls"
+                    conn.sock.settimeout(remaining_time())
+                    try:
+                        conn.sock = ssl.create_default_context().wrap_socket(conn.sock, server_hostname=target.hostname)
+                    except ssl.SSLEOFError as exc:
+                        conn.close()
+                        conn = None
+                        if result["tls_retries"]:
+                            raise
+                        remaining_time()
+                        result.update(tls_retries=1, tls_retry_reason=str(exc))
+                        continue
+                break
+            if target.scheme == "https":
+                path = urllib.parse.urlunsplit(("", "", target.path or "/", target.query, ""))
+            else:
+                path = current
+            path = urllib.parse.quote(path, safe="/:%?=&+#@!$'()*;,~-._[]")
+            stage = "http_response"
+            conn.sock.settimeout(remaining_time())
+            conn.request("GET", path, headers={"Host": target.netloc, "User-Agent": "net-proxy-tool/1.4"})
+            response = conn.getresponse()
+            result.update(code=response.status, response_received=True, path_verified=True)
+            location = response.getheader("Location")
+            if response.status in (301, 302, 303, 307, 308) and location:
+                result["redirects"].append({"url": current, "code": response.status, "location": location})
+                if hop == 5:
+                    result.update(error_type="redirect_limit", error="重定向超过 5 次")
+                    break
+                redirected = diagnostic_url(urllib.parse.urljoin(current, location))
+                if target.scheme == "https" and redirected.scheme == "http":
+                    result.update(error_type="redirect_downgrade", error="已拒绝 HTTPS 降级到 HTTP")
+                    break
+                target = redirected
+                conn.close()
+                conn = None
+                continue
+            result["http_ok"] = 200 <= response.status < 300
+            if result["http_ok"]:
+                result["status"] = "online"
+            else:
+                result["error_type"] = "proxy_auth" if response.status == 407 else "http_status"
+                result["error"] = f"HTTP {response.status} {response.reason}"
+            if include_preview:
+                stage = "response_body"
+                content_type = response.headers.get_content_type()
+                result["content_type"] = content_type
+                if content_type.startswith("text/") or content_type in ("application/json", "application/xml"):
+                    body = response.read(4097)
+                    charset = response.headers.get_content_charset() or "utf-8"
+                    try:
+                        result["preview"] = body[:4096].decode(charset, errors="replace")
+                    except LookupError:
+                        result["preview"] = body[:4096].decode("utf-8", errors="replace")
+                    result["preview_truncated"] = len(body) > 4096
+                else:
+                    result["preview"] = "二进制响应，未显示内容"
+            break
+    except ssl.SSLCertVerificationError as exc:
+        result.update(error_type="tls_certificate", error=str(exc))
+    except (TimeoutError, socket.timeout) as exc:
+        result.update(error_type="timeout", error=str(exc))
     except (ValueError, OSError, http.client.HTTPException) as exc:
         result["error"] = str(exc)
-        # http.client reports a rejected HTTPS CONNECT as OSError before getresponse().
+        result["error_type"] = {"validation": "invalid_url", "proxy_tcp": "proxy_connection",
+                                "proxy_tunnel": "proxy_tunnel", "tls": "tls_handshake"}.get(stage, "http_protocol")
         tunnel = re.match(r"Tunnel connection failed: (\d{3})\b", str(exc))
         if tunnel:
             result["code"] = int(tunnel[1])
+            result["path_verified"] = True
+            result["error_type"] = "proxy_auth" if result["code"] == 407 else "proxy_tunnel"
     finally:
         if conn is not None:
             conn.close()
+    if result["error_type"] and not result["http_ok"]:
+        result["status"] = "offline"
+    result["stage"] = stage
     result["latency_ms"] = round((time.monotonic() - started) * 1000, 1)
     return result
+
+
+def run_diagnostic_request(request, proxy_url):
+    """Run only the system curl with an explicit proxy and bounded read-only options."""
+    if os.name == "nt":
+        executable = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "curl.exe"
+    else:
+        executable = next((p for p in (Path("/usr/bin/curl"), Path("/bin/curl")) if p.is_file()), None)
+    if executable is None or not executable.is_file():
+        raise ValueError("未找到系统 curl，请使用首页的内置代理请求测试")
+    started = time.monotonic()
+    with tempfile.TemporaryDirectory(prefix="net-proxy-request-") as temp:
+        body_path, header_path = Path(temp) / "body", Path(temp) / "headers"
+        command = [str(executable), "--disable", "--silent", "--show-error",
+                   "--proxy", proxy_url, "--noproxy", "", "--proto", "=http,https",
+                   "--proto-redir", "=https" if request["url"].startswith("https:") else "=http,https",
+                   "--location", "--max-redirs", "5", "--connect-timeout", "4",
+                   "--max-time", "12", "--max-filesize", "65536", "--limit-rate", "64k",
+                   "--dump-header", str(header_path), "--output", str(body_path),
+                   "--write-out", "%{http_code}\n%{url_effective}\n%{num_redirects}\n%{remote_ip}"]
+        if request["method"] == "HEAD":
+            command.append("--head")
+        command.extend(["--url", request["url"]])
+        try:
+            completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                       timeout=14, shell=False, stdin=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired:
+            return {"status": "offline", "success": False, "error_type": "timeout",
+                    "error": "HTTP 请求超过总超时", "url": request["url"], "proxy_url": proxy_url}
+        metadata = completed.stdout.decode("utf-8", errors="replace").splitlines()
+        code = int(metadata[0]) if metadata and metadata[0].isdigit() and metadata[0] != "000" else None
+        headers = header_path.read_bytes()[:16384].decode("iso-8859-1") if header_path.exists() else ""
+        body = b""
+        if body_path.exists():
+            with body_path.open("rb") as stream:
+                body = stream.read(4097)
+        response_codes = re.findall(r"^HTTP/\S+ (\d{3})", headers, flags=re.MULTILINE)
+        tunnel_code = int(response_codes[-1]) if response_codes and code is None else None
+        ok = completed.returncode == 0 and code is not None and 200 <= code < 300
+        result = {"status": "online" if ok else "offline", "success": ok, "http_ok": ok,
+                  "url": request["url"], "request_url": request["url"],
+                  "final_url": metadata[1] if len(metadata) > 1 else request["url"],
+                  "proxy_url": proxy_url, "method": request["method"], "code": code or tunnel_code,
+                  "response_received": code is not None, "path_verified": bool(headers),
+                  "tcp_ok": bool(headers) or bool(len(metadata) > 3 and metadata[3]),
+                  "headers": headers, "preview": body[:4096].decode("utf-8", errors="replace"),
+                  "preview_truncated": len(body) > 4096,
+                  "redirect_count": int(metadata[2]) if len(metadata) > 2 and metadata[2].isdigit() else 0,
+                  "exit_code": completed.returncode,
+                  "latency_ms": round((time.monotonic() - started) * 1000, 1)}
+        if not ok:
+            result["error_type"] = {5: "proxy_connection", 7: "proxy_connection", 28: "timeout",
+                                    35: "tls_handshake", 60: "tls_certificate", 47: "redirect_limit",
+                                    63: "response_too_large"}.get(completed.returncode, "http_status")
+            if result["code"] == 407:
+                result["error_type"] = "proxy_auth"
+            elif tunnel_code:
+                result["error_type"] = "proxy_tunnel"
+            result["error"] = completed.stderr[:2048].decode("utf-8", errors="replace").strip() or f"HTTP {code}"
+        return result
 
 
 def validate_host_port(host, port):
@@ -329,13 +537,32 @@ def docker_ssh_command(target, *command):
             "-o", "ConnectTimeout=5", f"{user}@{host}", " ".join(map(shlex.quote, remote))]
 
 
-def validate_client(target):
+class NodeBindingConflict(ValueError):
+    pass
+
+
+def selected_node_gateway(target, cfg, request):
+    """Reject an action from a page whose saved node selection has changed."""
+    bound = target.get("bound_gateway_id") or ""
+    if "gateway_id" in request and request["gateway_id"] != bound:
+        raise NodeBindingConflict("节点绑定已变化，请刷新并重新保存所选网关。")
+    if "gateway_id" in request and not bound:
+        raise ValueError("请先选择并保存节点绑定的网关。")
+    if "binding_revision" in request and request["binding_revision"] != target.get("binding_revision", 0):
+        raise NodeBindingConflict("节点绑定版本已变化，请刷新后重试。")
+    return resolve_gateway_info(cfg, bound)
+
+
+def validate_client(target, cfg=None):
     validate_host_port(target["host"], target.get("port", 22))
     if target.get("access_mode") == "docker_host":
         validate_ssh_destination(target.get("ssh_host") or target["host"], target.get("ssh_user") or "ubuntu",
                                  target.get("container_name") or "")
     else:
         validate_ssh_destination(target["host"], target.get("ssh_user") or "root")
+    if cfg is not None and target.get("bound_gateway_id"):
+        if not resolve_gateway_info(cfg, target["bound_gateway_id"]):
+            raise ValueError("绑定的网关不存在，请重新选择并保存。")
 
 
 def apply_node_proxy(target, action, cfg):
@@ -408,42 +635,76 @@ def apply_node_proxy(target, action, cfg):
     return result
 
 
-def check_node_http(target):
+def check_node_http(target, gateway=None, target_url="https://example.com/"):
+    """Run a GET on the selected node, recording transport and HTTP separately."""
+    parsed = urllib.parse.urlsplit(target_url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("目标必须是无凭据的 HTTP 或 HTTPS URL")
     mode = target.get("access_mode") or ("docker_host" if target.get("container_name") and not target.get("port") else "ssh")
+    local = (mode != "docker_host" and is_local_host(target.get("host"))
+             and int(target.get("port") or 22) == 22 and not target.get("container_name"))
+    transport = "local" if local else ("ssh_docker_exec" if mode == "docker_host" else "ssh")
     started = time.monotonic()
-    result = {"online": False, "latency_ms": None, "is_proxy_enabled": bool(target.get("is_proxy_enabled"))}
+    stages = {"ssh": "skipped" if local else "pending",
+              "docker_exec": "pending" if mode == "docker_host" else "skipped",
+              "curl": "pending", "tcp": "pending", "http": "pending"}
+    result = {"online": False, "success": False, "latency_ms": None, "transport": transport,
+              "request_mode": "explicit_proxy" if gateway else "ordinary_request", "target_url": target_url,
+              "gateway_id": gateway.get("id") if gateway else None, "stages": stages,
+              "is_proxy_enabled": bool(target.get("is_proxy_enabled"))}
     try:
-        local = (mode != "docker_host" and is_local_host(target.get("host"))
-                 and int(target.get("port") or 22) == 22 and not target.get("container_name"))
-        # Use only the final status, not CONNECT headers or numbers in an HTTP body.
-        command = ["curl", "-sS", "-o", os.devnull if local else "/dev/null", "-w", "%{http_code}",
-                   "--max-time", "8", "https://www.google.com"]
+        executable = "curl.exe" if local and os.name == "nt" else "curl"
+        command = [executable]
+        if gateway:
+            proxy = gateway_url(gateway)
+            result["proxy_url"] = proxy
+            command += ["-q", "--proxy", proxy, "--noproxy", ""]
+        command += ["--request", "GET", "--no-location", "--globoff",
+                    "--silent", "--show-error", "--output", os.devnull if local else "/dev/null",
+                    "--write-out", "\nNPT_HTTP_RESULT:%{http_code}|%{remote_ip}|%{time_connect}\n",
+                    "--connect-timeout", "3", "--max-time", "8", "--proto", "=http,https", "--url", target_url]
         if local:
             res = subprocess.run(command, capture_output=True, text=True, errors="replace", timeout=10)
+            execution_ready = True
         else:
-            script = " ".join(map(shlex.quote, command))
+            curl_script = "printf 'NPT_EXEC_READY\\n'\n" + " ".join(map(shlex.quote, command))
             if mode == "docker_host":
-                res = ssh_with_script(docker_ssh_command(target, "exec", "-i"), script, 14)
+                ssh_command = docker_ssh_command(target, "exec", "-i", "-u", "0")
+                ssh_command[-1] = "printf 'NPT_SSH_READY\\n'; " + ssh_command[-1]
+                res = ssh_with_script(ssh_command, curl_script, 14)
             else:
                 user = target.get("ssh_user") or ("root" if target.get("os_type") == "docker" else "ubuntu")
+                script = "printf 'NPT_SSH_READY\\n'\n" + curl_script
                 res = run_remote_ssh_script(target["host"], target.get("port"), user,
                                             target.get("auth_type"), target.get("ssh_pass"), script, timeout=14)
-        code = res.stdout.strip()
-        result["online"] = res.returncode == 0 and bool(re.fullmatch(r"2[0-9]{2}", code))
-        result["status_line"] = ("HTTP " + code) if res.returncode == 0 else (res.stderr.strip() or "请求失败")
-        result["latency_ms"] = round((time.monotonic() - started) * 1000, 1)
+            stages["ssh"] = "passed" if "NPT_SSH_READY" in res.stdout else "failed"
+            execution_ready = "NPT_EXEC_READY" in res.stdout
+            if mode == "docker_host":
+                stages["docker_exec"] = "passed" if execution_ready else "failed"
+        result["exit_code"] = res.returncode
+        metrics = re.search(r"^NPT_HTTP_RESULT:(\d{3})\|([^|\r\n]*)\|([0-9.]+)$", res.stdout, re.MULTILINE)
+        stages["curl"] = "passed" if metrics else "failed"
+        if metrics:
+            code, remote_ip, connected_at = metrics.groups()
+            result["code"] = int(code) if code != "000" else None
+            result["remote_ip"] = remote_ip
+            stages["tcp"] = "passed" if remote_ip or float(connected_at) > 0 else "failed"
+            result["online"] = res.returncode == 0 and code.startswith("2")
+            stages["http"] = "passed" if result["online"] else "failed"
+            result["status_line"] = "HTTP " + code if code != "000" else "未收到 HTTP 响应"
+        else:
+            result["status_line"] = "目标上 curl 未完成" if execution_ready else "节点执行通道未就绪"
+        result["success"] = result["online"]
+        if not result["online"]:
+            result["error"] = res.stderr.strip()[:500] or result["status_line"]
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         result.update(error=str(exc), status_line=str(exc))
+        stages["curl" if local else "ssh"] = "failed"
+    for stage, status in stages.items():
+        if status == "pending":
+            stages[stage] = "not_reached"
+    result["latency_ms"] = round((time.monotonic() - started) * 1000, 1)
     return result
-
-
-DANGEROUS_PATTERNS = [
-    r"\brm\s+-[rf]*\s+/",
-    r"\bmkfs\b",
-    r"\bfdisk\b",
-    r"\bdd\s+if=",
-    r":\(\)\s*\{"
-]
 
 
 class ProxyConsoleHandler(SimpleHTTPRequestHandler):
@@ -601,7 +862,7 @@ echo "=================================================="
 
         if path == "/api/health":
             token = os.environ.get("NET_PROXY_INSTANCE_TOKEN", "")
-            self.send_json({"status": "ok", "version": "1.4.0", "service": "net-proxy-tool",
+            self.send_json({"status": "ok", "version": VERSION, "service": "net-proxy-tool",
                             "pid": os.getpid(), "instance_id": hashlib.sha256(token.encode()).hexdigest() if token else ""})
             return
 
@@ -651,6 +912,8 @@ echo "=================================================="
                         handlers[path]()
                 else:
                     handlers[path]()
+            except NodeBindingConflict as e:
+                self.send_json({"success": False, "error": str(e), "binding_changed": True}, status_code=409)
             except (ValueError, KeyError, TypeError) as e:
                 self.send_json({"success": False, "error": str(e)}, status_code=400)
             except Exception as e:
@@ -689,7 +952,9 @@ echo "=================================================="
                 "name": gw.get("name"),
                 "host": host,
                 "port": port,
-                "online": gw_ok,
+                "online": False,
+                "tcp_ok": gw_ok,
+                "path_verified": False,
                 "latency_ms": gw_rtt if gw_ok else None,
                 "error": None if gw_ok else str(gw_rtt)
             },
@@ -706,6 +971,8 @@ echo "=================================================="
                 ]
                 for f in futures:
                     results["targets"].append(f.result())
+            results["gateway"]["online"] = any(t.get("http_ok") for t in results["targets"])
+            results["gateway"]["path_verified"] = any(t.get("path_verified") for t in results["targets"])
 
         self.send_json(results)
 
@@ -738,8 +1005,13 @@ echo "=================================================="
         proxy = gateway_url({"host": host, "port": port, "protocol": req_json.get("protocol", "http")})
         ok, tcp_info = check_tcp_port(host, port, timeout=2.5)
         url = req_json.get("target_url") or "https://example.com/"
+        diagnostic_url(url)
         if not ok:
-            self.send_json({"success": False, "tcp_ok": False, "online": False, "error": tcp_info})
+            self.send_json({"success": False, "tcp_ok": False, "online": False, "http_ok": False,
+                            "path_verified": False, "response_received": False, "request_url": url,
+                            "final_url": url, "proxy_url": proxy, "code": None, "redirects": [],
+                            "tls_retries": 0, "tls_retry_reason": None,
+                            "stage": "proxy_tcp", "error_type": "proxy_connection", "error": tcp_info})
             return
         result = check_http_target("HTTP probe", url, proxy)
         online = result["status"] == "online"
@@ -932,7 +1204,7 @@ echo "=================================================="
         if "ssh_host" in req_json:
             new_client["ssh_host"] = req_json["ssh_host"].strip()
 
-        validate_client(new_client)
+        validate_client(new_client, cfg)
         clients.append(new_client)
         cfg["clients"] = clients
         save_config(cfg)
@@ -958,6 +1230,9 @@ echo "=================================================="
             self.send_json({"success": False, "error": f"未找到ID为 '{cid}' 的业务节点"}, status_code=404)
             return
 
+        previous_binding = target.get("bound_gateway_id") or ""
+        if "binding_revision" in req_json and req_json["binding_revision"] != target.get("binding_revision", 0):
+            raise NodeBindingConflict("节点绑定版本已变化，请刷新后重试。")
         if "name" in req_json: target["name"] = req_json["name"].strip()
         if "host" in req_json: target["host"] = req_json["host"].strip()
         if "port" in req_json: target["port"] = int(req_json["port"])
@@ -969,13 +1244,16 @@ echo "=================================================="
         if "bound_gateway_id" in req_json: target["bound_gateway_id"] = req_json["bound_gateway_id"].strip()
         if "container_name" in req_json: target["container_name"] = req_json["container_name"].strip()
         if "ssh_host" in req_json: target["ssh_host"] = req_json["ssh_host"].strip()
-        if "is_proxy_enabled" in req_json: target["is_proxy_enabled"] = bool(req_json["is_proxy_enabled"])
         if "tags" in req_json:
             t = req_json["tags"]
             target["tags"] = t if isinstance(t, list) else [x.strip() for x in str(t).split(",") if x.strip()]
         if "description" in req_json: target["description"] = req_json["description"].strip()
 
-        validate_client(target)
+        validate_client(target, cfg)
+        if (target.get("bound_gateway_id") or "") != previous_binding:
+            target["binding_revision"] = target.get("binding_revision", 0) + 1
+            if target.get("is_proxy_enabled"):
+                target.setdefault("applied_gateway_id", previous_binding)
         save_config(cfg)
         write_audit_log("client_update", cid, "success", f"更新节点: {target['name']}")
         self.send_json({"success": True, "message": "业务节点更新成功", "client": target})
@@ -1017,7 +1295,7 @@ echo "=================================================="
             self.send_json({"success": False, "error": f"未找到节点 {node_id}"}, status_code=404)
             return
 
-        gw = resolve_gateway_info(cfg, target.get("bound_gateway_id"))
+        gw = selected_node_gateway(target, cfg, req_json)
         if action not in ("on", "off"):
             raise ValueError("无效的节点操作")
         dispatch_result = apply_node_proxy(target, action, cfg)
@@ -1029,6 +1307,7 @@ echo "=================================================="
             return
         # 更新节点配置状态
         target["is_proxy_enabled"] = (action == "on")
+        target["applied_gateway_id"] = gw.get("id") if action == "on" else None
         save_config(cfg)
 
         msg = (
@@ -1046,6 +1325,8 @@ echo "=================================================="
             "node_id": node_id,
             "is_proxy_enabled": target["is_proxy_enabled"],
             "gateway": f"{gw['host']}:{gw['port']}" if gw else None,
+            "gateway_id": gw.get("id"),
+            "binding_revision": target.get("binding_revision", 0),
             "dispatch_result": dispatch_result,
             "message": msg
         })
@@ -1070,6 +1351,8 @@ echo "=================================================="
                 ok = res.get("returncode") == 0
                 if ok:
                     target["is_proxy_enabled"] = (action == "on")
+                    gateway = resolve_gateway_info(cfg, target.get("bound_gateway_id"))
+                    target["applied_gateway_id"] = gateway.get("id") if action == "on" else None
                 results.append({
                     "node_id": cid,
                     "name": target.get("name"),
@@ -1110,6 +1393,7 @@ echo "=================================================="
         """
         Performs concurrent health checks across all worker nodes and containers.
         """
+        self.read_json_body()
         cfg = load_config()
         clients = cfg.get("clients", [])
         health_map = {}
@@ -1145,9 +1429,22 @@ echo "=================================================="
             self.send_json({"success": False, "error": f"未找到ID为 '{node_id}' 的节点"}, status_code=404)
             return
 
-        result = check_node_http(target)
-        self.send_json(dict(result, success="error" not in result, node_id=node_id,
-                            message=result["status_line"]))
+        gateway = selected_node_gateway(target, cfg, req_json)
+        url = req_json.get("target_url") or "https://example.com/"
+        ordinary = check_node_http(target, target_url=url)
+        explicit = check_node_http(target, gateway, url) if gateway else {
+            "online": False, "success": False, "error": "请先保存节点绑定的网关。", "stages": {},
+            "request_mode": "explicit_proxy", "status_line": "尚未绑定网关"}
+        current = load_config()
+        present = next((item for item in current.get("clients", []) if item.get("id") == node_id), None)
+        if (present is None or present.get("bound_gateway_id") != target.get("bound_gateway_id")
+                or present.get("binding_revision", 0) != target.get("binding_revision", 0)
+                or resolve_gateway_info(current, target.get("bound_gateway_id")) != gateway):
+            raise NodeBindingConflict("测试期间节点绑定已变化，请重新测试。")
+        message = "指定网关请求：{}；节点普通请求：{}".format(explicit["status_line"], ordinary["status_line"])
+        self.send_json(dict(ordinary, success=explicit["online"] and ordinary["online"], node_id=node_id,
+                            gateway_id=gateway.get("id"), binding_revision=target.get("binding_revision", 0),
+                            explicit_proxy=explicit, ordinary_request=ordinary, message=message))
 
     def handle_gateway_add(self):
         req_json = self.read_json_body()
@@ -1162,12 +1459,27 @@ echo "=================================================="
             self.send_json({"success": False, "error": "网关名称和IP不能为空"}, status_code=400)
             return
 
-        if not gid:
-            safe_slug = re.sub(r"[^a-zA-Z0-9-]", "", host.replace(".", "-"))
-            gid = f"gw-{safe_slug}"
-
         cfg = load_config()
         gateways = cfg.get("gateways", [])
+        values = {"name": name, "host": host, "port": port, "protocol": protocol, "description": desc}
+        gateway_url(values)
+        # Identical retries reuse their saved identity, including when the first response was lost.
+        for g in gateways:
+            if (not gid or g.get("id") == gid) and all(g.get(key, "") == value for key, value in values.items()):
+                self.send_json({"success": True, "message": "代理网关已存在", "gateway": g})
+                return
+        if not gid:
+            safe_slug = re.sub(r"[^a-zA-Z0-9-]", "", host.replace(".", "-")) or "gateway"
+            base = f"gw-{safe_slug}"
+            used = {g.get("id") for g in gateways}
+            gid = base
+            if gid in used:
+                base = f"{base}-{port}"
+                gid = base
+                suffix = 2
+                while gid in used:
+                    gid = f"{base}-{suffix}"
+                    suffix += 1
         for g in gateways:
             if g.get("id") == gid:
                 self.send_json({"success": False, "error": f"网关ID '{gid}' 已存在"}, status_code=400)
@@ -1231,6 +1543,8 @@ echo "=================================================="
         if gid == cfg.get("active_gateway_id"):
             self.send_json({"success": False, "error": "不能删除当前正处于激活状态的默认网关，请先切换默认网关"}, status_code=400)
             return
+        if any(node.get("bound_gateway_id") == gid for node in cfg.get("clients", [])):
+            raise NodeBindingConflict("仍有节点绑定此网关，请先保存这些节点的新绑定。")
 
         gateways = cfg.get("gateways", [])
         new_gateways = [g for g in gateways if g.get("id") != gid]
@@ -1244,76 +1558,29 @@ echo "=================================================="
         self.send_json({"success": True, "message": "代理网关删除成功", "id": gid})
 
     def handle_api_run(self):
-        try:
-            req_json = self.read_json_body()
-            cmd_text = req_json.get("command", "").strip()
-            gid = req_json.get("gateway_id")
-        except Exception:
-            self.send_error(400, "Invalid JSON payload")
-            return
-
-        if not cmd_text:
-            self.send_error(400, "Command cannot be empty")
-            return
-
-        for pat in DANGEROUS_PATTERNS:
-            if re.search(pat, cmd_text):
-                self.send_error(403, "Command blocked for system security.")
-                return
-
+        payload = self.read_json_body()
+        request = diagnostic_command(payload)
         cfg = load_config()
-        gw = resolve_gateway_info(cfg, gid)
-        gw_arg = gateway_url(gw)[len("http://"):]
-
+        gw = resolve_gateway_info(cfg, payload.get("gateway_id"))
+        proxy = gateway_url(gw)
+        result = run_diagnostic_request(request, proxy)
         self.close_connection = True
         self.send_response(200)
         self.send_header("Connection", "close")
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
-
-        def send_event(data_dict):
-            payload = f"data: {json.dumps(data_dict, ensure_ascii=False)}\n\n".encode("utf-8")
-            self.wfile.write(payload)
-            self.wfile.flush()
-
-        send_event({
-            "type": "start",
-            "command": cmd_text,
-            "gateway": f"{gw['name']} ({gw_arg})",
-            "time": time.strftime("%H:%M:%S")
-        })
-
-        with_proxy_script = str(TOOL_DIR / "with_proxy.py")
-        exec_cmd = [sys.executable, with_proxy_script, "--gateway", gw_arg] + cmd_text.split()
-
-        try:
-            p = subprocess.Popen(
-                exec_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                cwd=str(TOOL_DIR)
-            )
-
-            for line in p.stdout:
-                send_event({"type": "stdout", "line": line.rstrip("\r\n")})
-
-            p.wait()
-            # Zero pollution check
-            env_clean = "HTTP_PROXY" not in os.environ and "http_proxy" not in os.environ
-            send_event({
-                "type": "finish",
-                "exit_code": p.returncode,
-                "env_clean": env_clean,
-                "msg": f"任务结束，子进程退出码为 {p.returncode}。"
-            })
-        except Exception as e:
-            send_event({
-                "type": "error",
-                "msg": f"沙箱执行异常: {e}"
-            })
+        events = [
+            {"type": "start", "command": request["method"] + " " + request["url"],
+             "gateway": f"{gw['name']} ({proxy})", "time": time.strftime("%H:%M:%S")},
+            {"type": "result", **result},
+            {"type": "stdout", "line": result.get("headers", "")},
+            {"type": "stdout", "line": result.get("preview", "")},
+            {"type": "finish", "exit_code": 0 if result.get("success") else 1,
+             "msg": "HTTP 请求完成" if result.get("success") else result.get("error", "请求失败")},
+        ]
+        for event in events:
+            self.wfile.write(f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8"))
+        self.wfile.flush()
 
 
 def run_server(port=None, bind=None):

@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 NO_PROXY = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,*.local"
 TARGETS = {
     "Google": "https://www.google.com",

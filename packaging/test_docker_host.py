@@ -1,6 +1,7 @@
 """Exercise SSH -> Docker on an ephemeral Linux Actions runner using a second, loopback-only sshd."""
 import getpass
 import hashlib
+import json
 import os
 import re
 import socket
@@ -12,6 +13,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from smoke import api
+from test_node_requests import FIXTURE
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = "python:3.12-alpine"
@@ -47,7 +49,8 @@ def run():
     if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
         raise RuntimeError("Run this sshd fixture on an ephemeral GitHub-hosted Linux runner.")
     prefix = "npt-host-" + uuid.uuid4().hex[:12]
-    controller, target, sibling = [prefix + "-" + kind for kind in ("controller", "target", "sibling")]
+    controller, target, sibling, fixture, network = [
+        prefix + "-" + kind for kind in ("controller", "target", "sibling", "fixture", "net")]
     port, ssh_port = free_port(), free_port()
     while ssh_port == port:
         ssh_port = free_port()
@@ -57,8 +60,20 @@ def run():
         directory = Path(tmp)
         invoke("docker", "build", "-t", prefix, str(ROOT))
         cleanup.callback(invoke, "docker", "image", "rm", prefix, check=False)
+        node_image = prefix + "-node"
+        with tempfile.TemporaryDirectory() as context:
+            subprocess.run(["docker", "build", "-t", node_image, "-f", "-", context],
+                           input=(ROOT / "packaging/ssh-target.Dockerfile").read_bytes(), check=True, timeout=300)
+        cleanup.callback(invoke, "docker", "image", "rm", node_image, check=False)
+        invoke("docker", "network", "create", "--internal", network)
+        cleanup.callback(invoke, "docker", "network", "rm", network, check=False)
+        fixture_script = directory / "fixture.py"
+        fixture_script.write_text(FIXTURE, encoding="utf-8")
+        invoke("docker", "run", "--name", fixture, "--network", network, "--network-alias", "fixture",
+               "-v", str(fixture_script) + ":/fixture.py:ro", "-d", BASE, "python", "/fixture.py")
+        cleanup.callback(invoke, "docker", "rm", "-f", fixture, check=False)
         for name in [target, sibling]:
-            invoke("docker", "run", "--network", "none", "--name", name, "-d", BASE, "sleep", "300")
+            invoke("docker", "run", "--network", network, "--name", name, "-d", node_image, "sleep", "300")
             cleanup.callback(invoke, "docker", "rm", "-f", name, check=False)
             invoke("docker", "exec", name, "sh", "-ec", "printf 'silent\\n' > /root/.curlrc")
         original_sibling = container_snapshot(sibling)
@@ -119,19 +134,36 @@ DisableForwarding yes
         print(diagnostic.stdout.strip())
         preflight = api(port, "/api/test-node-preflight", node)
         assert preflight.get("auth_ok") and preflight.get("success"), preflight
-        assert api(port, "/api/gateways/add", {"name": "test", "host": "127.0.0.1", "port": 17777})["success"]
+        assert api(port, "/api/gateways/add", {"name": "test", "host": "fixture", "port": 7890})["success"]
         node["bound_gateway_id"] = api(port, "/api/config")["gateways"][0]["id"]
         assert api(port, "/api/clients/add", node)["success"]
-        for action in ["on", "off"]:
-            result = api(port, "/api/node-switch", {"node_id": node["id"], "action": action})
-            assert result.get("success"), result
+        expected_proxy_hits = 0
+        payload = {"node_id": node["id"], "gateway_id": node["bound_gateway_id"],
+                   "target_url": "http://fixture:8080/health"}
+        for action, increase in [(None, 1), ("on", 2), ("off", 1)]:
+            if action:
+                result = api(port, "/api/node-switch", dict(payload, action=action))
+                assert result.get("success"), result
             if action == "on":
-                assert "127.0.0.1:17777" in invoke("docker", "exec", target, "cat", "/root/.curlrc")
+                assert "fixture:7890" in invoke("docker", "exec", target, "cat", "/root/.curlrc")
             else:
                 assert container_snapshot(target) == original_target
+            result = api(port, "/api/node-test", payload)
+            for mode in ("explicit_proxy", "ordinary_request"):
+                request = result[mode]
+                assert request["online"], result
+                assert request["transport"] == "ssh_docker_exec", request
+                assert request["stages"]["ssh"] == request["stages"]["docker_exec"] == "passed", request
+            # A neighboring container performs its own ordinary request with no proxy changes.
+            invoke("docker", "exec", sibling, "curl", "-fsS", "--max-time", "5", "http://fixture:8080/health")
+            code = "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080/hits').read().decode())"
+            hits = json.loads(invoke("docker", "exec", fixture, "python", "-c", code))
+            expected_proxy_hits += increase
+            assert sum(hit["route"] == "proxy" for hit in hits) == expected_proxy_hits, hits
             assert container_snapshot(sibling) == original_sibling
             assert host_snapshot() == original_host
-    print("Real SSH -> Docker inspect/exec changed the target only and restored its original settings.")
+            print("SSH -> Docker", action or "before activation", "recorded proxy requests", expected_proxy_hits)
+    print("Real SSH -> Docker requests, target restoration, and neighboring-container/host isolation passed.")
 
 
 if __name__ == "__main__":

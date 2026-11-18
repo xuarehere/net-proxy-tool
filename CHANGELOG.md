@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.1]
+
+- Follow redirects through the selected proxy and report the final HTTP result. The wizard and topology use the same diagnostic result.
+- Save and confirm node bindings. Keep the selected node across refreshes and reject actions against a changed binding.
+- Compare an explicit proxy request and an ordinary curl request on the target. The console request runner supports structured HTTP requests. Use the CLI for application commands.
+- 升级时停止旧控制台，保留原配置，在新目录解压并启动。核对节点绑定后再开启代理。详细流程见[运维指南](docs/operations.md)。
+- To upgrade, stop the old console, keep its configuration, extract to a new directory and confirm each binding before switching a node. See the [operations guide](docs/operations_en.md).
+
 ## [1.4.0] - 2026-11-16
 
 ### Open the Web console · 打开控制台

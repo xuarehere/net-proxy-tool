@@ -33,6 +33,15 @@ Bind the node to a gateway, run its preflight check and test the switch on that 
 
 Remote switching can change curl, wget, pip, Git and shell configuration for the target account. A root account can also modify target system configuration. Version 1.4 keeps snapshots in the target account's `~/.local/state/net-proxy-tool/`. If a file was edited after activation, compare it with its snapshot and preserve the operator's changes. Legacy settings with no original snapshot also require review.
 
+## When the console works but the workload fails
+
+1. Save the binding and check the node name and gateway together before switching.
+2. Run the explicit proxy request on that node. Use its result to locate an SSH login failure, a missing container, a gateway route problem or a target response. An SSH authentication failure occurs before the target command starts.
+3. Compare the ordinary curl request from the same account. Its environment, curl configuration and bypass list can change the route. After enabling the binding, check the gateway log to confirm the request passed through it.
+4. Restore the initial switch state. Keep both the snapshot and the current file when an operator edit requires a manual merge.
+
+In v1.3 the first wizard step checked TCP. In v1.4.0 it sent a real request but reported HTTP 302 as offline. Version 1.4.1 follows redirects through the selected gateway and reports proxy authentication, TLS and final HTTP results separately.
+
 ## Use Docker Compose
 
 On a host with Docker and Compose, run these commands in the source directory. The console publishes port 8899 on the host's loopback interface and stores configuration in a named volume.
@@ -47,9 +56,11 @@ Open `http://127.0.0.1:8899/` on the host. Stop with `docker compose down`. Insi
 
 ## Diagnose by symptom
 
+If the peer closes a TLS handshake before the GET is sent, the gateway probe reconnects once within the original time budget. The result records the retry. Certificate validation failures are reported immediately.
+
 | Symptom | Check |
 | --- | --- |
-| Windows reports that `roxy-tool` or `2` is not a command | Extract the entire v1.4.0 Windows ZIP into a new directory and use its root `Start.bat`. The older UTF-8/LF batch file could parse incorrectly under code page 936. |
+| Windows reports that `roxy-tool` or `2` is not a command | Extract the entire v1.4.1 Windows ZIP into a new directory and use its root `Start.bat`. The older UTF-8/LF batch file could parse incorrectly under code page 936. |
 | No page after double-click | Extract all files and check the architecture. Run the launcher in a terminal to see the error. Open the printed URL if needed. |
 | Port 8899 is occupied | Try a free port such as 8900. To stop a running instance for this configuration, use the same launcher with `--stop`. |
 | The console opens but the proxy test fails | Verify the listening address and HTTP/mixed port. For a failed TCP connection, check the proxy service, interface and firewall. If TCP works, check protocol, upstream route and target. |
