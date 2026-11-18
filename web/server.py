@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer as HTTPServer
 from socketserver import TCPServer
 import argparse
+import copy
 import hashlib
 import hmac
 import http.client
@@ -36,6 +37,7 @@ if __package__ in (None, ""):
 
 from sdk.config import DEFAULT_TEST_URL, VERSION, data_dir, load_config, resolve_gateway_info, save_config
 from web import node_probe
+from web import node_baseline
 from web.ssh_askpass import password_environment
 
 CONFIG_WRITE_LOCK = threading.RLock()
@@ -194,10 +196,12 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 1
     started = time.monotonic()
     result = {"name": name, "url": url, "request_url": url, "final_url": url,
               "desc": desc, "category": category, "status": "offline", "proxy_url": proxy_url,
-              "tcp_ok": False, "path_verified": False, "response_received": False,
+              "tcp_ok": False, "tcp_latency_ms": None, "path_verified": False, "response_received": False,
               "http_ok": False, "redirects": [], "code": None, "error_type": None,
-              "tls_retries": 0, "tls_retry_reason": None}
+              "tls_retries": 0, "tls_retry_reason": None, "attempts": [], "first_status": None,
+              "final_status": None, "budget_ms": round(timeout * 1000), "budget_expired": False}
     conn = None
+    attempt = None
     stage = "validation"
 
     def remaining_time():
@@ -220,10 +224,15 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 1
                 result.update(error_type="redirect_loop", error="目标出现重定向循环")
                 break
             seen.add(current)
-            for _ in range(2):
-                remaining = remaining_time()
+            for attempt_index in range(2):
                 # Every hop and TLS retry uses the selected proxy and the same deadline.
                 stage = "proxy_tcp"
+                attempt_started = time.monotonic()
+                attempt = {"hop": hop + 1, "attempt": attempt_index + 1, "url": current, "tcp_ok": False,
+                           "connect_status": None, "tls": "not_reached" if target.scheme == "https" else "skipped",
+                           "http_status": None, "elapsed_ms": None}
+                result["attempts"].append(attempt)
+                remaining = remaining_time()
                 conn = http.client.HTTPConnection(proxy.hostname, proxy.port, timeout=remaining)
                 if target.scheme == "https":
                     conn.set_tunnel(target.hostname, target.port or 443)
@@ -231,16 +240,24 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 1
                 else:
                     conn.connect()
                 result["tcp_ok"] = True
+                attempt["tcp_ok"] = True
+                if result["tcp_latency_ms"] is None:
+                    result["tcp_latency_ms"] = round((time.monotonic() - attempt_started) * 1000, 1)
                 if target.scheme == "https":
                     stage = "proxy_tunnel"
                     conn.sock.settimeout(remaining_time())
                     conn._tunnel()
+                    attempt["connect_status"] = 200
                     result["path_verified"] = True
                     stage = "tls"
-                    conn.sock.settimeout(remaining_time())
                     try:
-                        conn.sock = ssl.create_default_context().wrap_socket(conn.sock, server_hostname=target.hostname)
+                        context = ssl.create_default_context()
+                        conn.sock.settimeout(remaining_time())
+                        conn.sock = context.wrap_socket(conn.sock, server_hostname=target.hostname)
+                        attempt["tls"] = "passed"
                     except ssl.SSLEOFError as exc:
+                        attempt["tls"] = "eof"
+                        attempt["elapsed_ms"] = round((time.monotonic() - attempt_started) * 1000, 1)
                         conn.close()
                         conn = None
                         if result["tls_retries"]:
@@ -257,7 +274,12 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 1
             stage = "http_response"
             conn.sock.settimeout(remaining_time())
             conn.request("GET", path, headers={"Host": target.netloc, "User-Agent": "net-proxy-tool/1.4"})
+            conn.sock.settimeout(remaining_time())
             response = conn.getresponse()
+            attempt["http_status"] = response.status
+            attempt["elapsed_ms"] = round((time.monotonic() - attempt_started) * 1000, 1)
+            if result["first_status"] is None:
+                result["first_status"] = response.status
             result.update(code=response.status, response_received=True, path_verified=True)
             location = response.getheader("Location")
             if response.status in (301, 302, 303, 307, 308) and location:
@@ -273,6 +295,7 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 1
                 conn.close()
                 conn = None
                 continue
+            result["final_status"] = response.status
             result["http_ok"] = 200 <= response.status < 300
             if result["http_ok"]:
                 result["status"] = "online"
@@ -295,9 +318,12 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 1
                     result["preview"] = "二进制响应，未显示内容"
             break
     except ssl.SSLCertVerificationError as exc:
+        attempt["tls"] = "certificate_error"
         result.update(error_type="tls_certificate", error=str(exc))
     except (TimeoutError, socket.timeout) as exc:
         result.update(error_type="timeout", error=str(exc))
+        if stage == "tls" and attempt["tls"] != "eof":
+            attempt["tls"] = "timeout"
     except (ValueError, OSError, http.client.HTTPException) as exc:
         result["error"] = str(exc)
         result["error_type"] = {"validation": "invalid_url", "proxy_tcp": "proxy_connection",
@@ -305,8 +331,10 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 1
         tunnel = re.match(r"Tunnel connection failed: (\d{3})\b", str(exc))
         if tunnel:
             result["code"] = int(tunnel[1])
-            result["path_verified"] = True
+            attempt["connect_status"] = result["code"]
             result["error_type"] = "proxy_auth" if result["code"] == 407 else "proxy_tunnel"
+        elif stage == "tls" and attempt["tls"] == "not_reached":
+            attempt["tls"] = "failed"
     finally:
         if conn is not None:
             conn.close()
@@ -314,6 +342,9 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 1
         result["status"] = "offline"
     result["stage"] = stage
     result["latency_ms"] = round((time.monotonic() - started) * 1000, 1)
+    if attempt is not None and attempt["elapsed_ms"] is None:
+        attempt["elapsed_ms"] = round((time.monotonic() - attempt_started) * 1000, 1)
+    result["budget_expired"] = result["error_type"] == "timeout" and time.monotonic() - started >= timeout
     return result
 
 
@@ -408,7 +439,7 @@ def validate_bypass(value):
 def public_data(value):
     if isinstance(value, dict):
         return {key: public_data(child) for key, child in value.items()
-                if key.lower() not in {"ssh_pass", "password", "token", "api_key", "private_key"}}
+                if key.lower() not in {"ssh_pass", "password", "token", "api_key", "private_key", "_node_baseline", "_node_restored_baseline"}}
     if isinstance(value, list):
         return [public_data(child) for child in value]
     return value
@@ -445,13 +476,13 @@ def run_remote_ssh_script(host, port, user, auth_type, password, script, timeout
     return ssh_with_script(cmd, script, timeout)
 
 
-def generate_provisioning_script(proxy_url, no_proxy, action="on"):
+def generate_provisioning_script(proxy_url, no_proxy, action="on", owner=""):
     """Deploy a POSIX script with per-file snapshots and conflict detection."""
     if action not in ("on", "off"):
         raise ValueError("Invalid switch action")
     template = (WEB_DIR / "provision.sh").read_text(encoding="utf-8")
     return "action={}\nproxy={}\nbypass={}\n".format(
-        action, shlex.quote(proxy_url), shlex.quote(validate_bypass(no_proxy))) + template
+        action, shlex.quote(proxy_url), shlex.quote(validate_bypass(no_proxy))) + "npt_owner={}\n".format(shlex.quote(owner)) + template
 
 
 def validate_ssh_destination(host, user, container=None):
@@ -480,6 +511,9 @@ def docker_ssh_command(target, *command):
 def node_ssh_identity(target):
     """The complete destination that a saved credential is allowed to authenticate."""
     mode = (target.get("access_mode") or ("docker_host" if target.get("container_name") and not target.get("port") else "ssh")).lower()
+    if mode == "local":
+        identity = node_probe.local_identity()
+        return ("local", "localhost", 0, identity["user"], identity["home"])
     host = (target.get("ssh_host") or target.get("host")) if mode == "docker_host" else target.get("host")
     user = target.get("ssh_user") or ("root" if mode != "docker_host" and target.get("os_type") == "docker" else "ubuntu")
     return (mode, host, int(target.get("port") or 22), user,
@@ -489,6 +523,11 @@ def node_ssh_identity(target):
 def run_node_script(target, script, timeout=14):
     """Run a fixed node operation using the same saved identity and SSH trust policy."""
     mode, host, port, user, _ = node_ssh_identity(target)
+    if mode == "local":
+        if os.name == "nt":
+            raise ValueError("Windows 本机请使用单命令或 PowerShell 会话代理")
+        return subprocess.run(["sh"], input=script, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=timeout)
     auth_type = target.get("auth_type") or ("password" if target.get("ssh_pass") else "key")
     remote = "sh"
     if mode == "docker_host":
@@ -518,6 +557,83 @@ class NodeBindingConflict(ValueError):
     pass
 
 
+def node_revision(target):
+    return int(target.get("node_revision", 0))
+
+
+def require_node_revision(target, request):
+    if request.get("node_revision") != node_revision(target):
+        raise NodeBindingConflict("节点记录已变化或缺少版本，请刷新后重试。")
+
+
+def legacy_local_identity(target):
+    return (not target.get("identity_version") and node_ssh_identity(target)[0] == "ssh"
+            and int(target.get("port") or 22) == 22 and is_local_host(target.get("host")))
+
+
+def require_execution_identity(target):
+    if legacy_local_identity(target):
+        raise ValueError("旧节点曾按本机地址推断执行位置；请编辑节点并明确选择本机或 SSH，再进行写入。")
+
+
+def management_identity(target):
+    mode, host, port, user, container = node_ssh_identity(target)
+    if mode == "local":
+        return mode, user, container
+    host = (host or "").lower().rstrip(".")
+    return (mode, host, port, container, "root") if mode == "docker_host" else (mode, host, port, user)
+
+
+def unique_node_identity(target, cfg, excluding=None):
+    identity = management_identity(target)
+    for other in cfg.get("clients", []):
+        if other.get("id") != excluding and management_identity(other) == identity:
+            raise NodeBindingConflict("该执行账号/容器已由节点 {} 登记，请编辑现有节点。".format(other.get("id")))
+
+
+def node_public_state(target):
+    result = dict(target)
+    if target.get("access_mode") == "local":
+        result["os_type"] = "windows" if os.name == "nt" else "macos" if sys.platform == "darwin" else "linux"
+    result.setdefault("node_revision", 0)
+    result.setdefault("managed_state", "unknown")
+    result["identity_confirmation_required"] = legacy_local_identity(target)
+    return result
+
+
+def update_node_outcome(target, action, result):
+    target["node_revision"] = node_revision(target) + 1
+    target["managed_state"] = result.get("managed_state", "unknown")
+    target["verification"] = result.get("verification", {"verified": False, "status": "unknown"})
+    if result.get("returncode") == 0:
+        target["is_proxy_enabled"] = action == "on"
+        target["applied_gateway_id"] = target.get("bound_gateway_id") if action == "on" else None
+        target.pop("pending_action", None)
+        target["lifecycle_version"] = 1
+        if action == "off":
+            if result.get("_node_baseline"):
+                target["_node_restored_baseline"] = result["_node_baseline"]
+            target.pop("_node_baseline", None)
+            target.pop("applied_identity", None)
+        else:
+            target.pop("_node_restored_baseline", None)
+    if result.get("_node_baseline") is not None and not (action == "off" and result.get("returncode") == 0):
+        target["_node_baseline"] = result["_node_baseline"]
+
+
+def needs_node_restoration(target):
+    return bool(target.get("is_proxy_enabled") or target.get("pending_action") or target.get("_node_baseline")
+                or target.get("_node_restored_baseline")
+                or target.get("managed_state") == "enabled" or not target.get("lifecycle_version"))
+
+
+def archived_node(target):
+    # Deleted records retain no authentication material, baseline, or environment copy.
+    allowed = ("id", "name", "host", "port", "os_type", "access_mode", "ssh_host", "ssh_user",
+               "container_name", "bound_gateway_id", "node_revision")
+    return {key: copy.deepcopy(target[key]) for key in allowed if key in target}
+
+
 def selected_node_gateway(target, cfg, request):
     """Reject an action from a page whose saved node selection has changed."""
     bound = target.get("bound_gateway_id") or ""
@@ -531,11 +647,18 @@ def selected_node_gateway(target, cfg, request):
 
 
 def validate_client(target, cfg=None):
+    mode = target.get("access_mode", "ssh")
+    if mode not in ("ssh", "docker_host", "local"):
+        raise ValueError("请选择 SSH、Docker 宿主机或明确的本机执行模式。")
+    if target.get("auth_type", "key") not in ("key", "password"):
+        raise ValueError("请选择密钥或密码认证。")
+    if mode == "local" and not is_local_host(target.get("host")):
+        raise ValueError("本机模式仅接受控制台所在机器的地址。")
     validate_host_port(target["host"], target.get("port", 22))
-    if target.get("access_mode") == "docker_host":
+    if mode == "docker_host":
         validate_ssh_destination(target.get("ssh_host") or target["host"], target.get("ssh_user") or "ubuntu",
                                  target.get("container_name") or "")
-    else:
+    elif mode != "local":
         validate_ssh_destination(target["host"], target.get("ssh_user") or "root")
     if cfg is not None and target.get("bound_gateway_id"):
         if not resolve_gateway_info(cfg, target["bound_gateway_id"]):
@@ -543,57 +666,93 @@ def validate_client(target, cfg=None):
 
 
 def apply_node_proxy(target, action, cfg):
-    """
-    Dual-layer provisioning engine (Dedicated Tool Configs + Shell Environment Hooks).
-    Unified support for:
-    1. Local node (self machine, cross-platform detected via is_local_host)
-    2. Remote workstations / edge boards / containers via their configured SSH identity
-    3. Host Docker Engine penetration (legacy containers without SSH daemon)
-    """
-    os_type = (target.get("os_type") or "linux").lower()
-    access_mode = (target.get("access_mode") or ("docker_host" if target.get("container_name") and not target.get("port") else "ssh")).lower()
-    gw = resolve_gateway_info(cfg, target.get("bound_gateway_id"))
-    proxy_url = gateway_url(gw) if action == "on" else ""
-    no_proxy = cfg.get("no_proxy", "localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,*.local")
-
-    result = {"action": action, "node_id": target.get("id"), "os_type": os_type, "access_mode": access_mode}
-
-    # 1. 宿主机 Docker 穿透通道 (Legacy / Specific for containers without SSH)
-    if access_mode == "docker_host":
-        script = generate_provisioning_script(proxy_url, no_proxy, action)
-        try:
-            res = run_node_script(target, script, timeout=12)
-            result["returncode"] = res.returncode
-            if res.returncode != 0:
-                result["stderr"] = res.stderr.strip()
-        except Exception as e:
-            result["error"] = str(e)
-        return result
-
-    # 2. 本地 Linux 节点 (动态检测当前服务器本机)
-    if is_local_host(target.get("host")) and int(target.get("port") or 22) == 22 and not target.get("container_name"):
-        if sys.platform == "win32" or os_type == "windows":
-            return dict(result, error="Windows 本机请使用单命令或 PowerShell 会话代理")
-        script = generate_provisioning_script(proxy_url, no_proxy, action)
-        try:
-            res = subprocess.run(["sh", "-c", script], capture_output=True, text=True, errors="replace", timeout=10)
-            result["returncode"] = res.returncode
-            if res.returncode != 0:
-                result["stderr"] = res.stderr.strip()
-        except Exception as e:
-            result["error"] = str(e)
-        return result
-
-    # 3. 通用远程 SSH 直连通道 (物理工作站 / 工控机 / 边缘设备 / 暴露端口的 Docker 容器)
-    script = generate_provisioning_script(proxy_url, no_proxy, action)
+    """Journal the baseline before writing, then verify using the same execution identity."""
+    require_execution_identity(target)
+    mode = node_ssh_identity(target)[0]
+    if mode == "local" and os.name == "nt":
+        return {"returncode": 1, "managed_state": "unknown", "error": "Windows 本机请使用单命令或 PowerShell 会话代理"}
+    if action not in ("on", "off"):
+        raise ValueError("无效的节点操作")
+    bound = (target.get("applied_gateway_id") or target.get("bound_gateway_id")) if action == "off" else target.get("bound_gateway_id")
+    gateway = resolve_gateway_info(cfg, bound) if bound else {}
+    if action == "on" and not gateway:
+        raise ValueError("开启前必须选择并保存此节点的网关绑定。")
+    result = {"action": action, "node_id": target.get("id"), "access_mode": mode,
+              "returncode": 1, "managed_state": "unknown"}
     try:
-        res = run_node_script(target, script, timeout=14)
-        result["returncode"] = res.returncode
-        if res.returncode != 0:
-            result["stderr"] = res.stderr.strip()
-    except Exception as e:
-        result["error"] = str(e)
-
+        if target.get("applied_identity") and tuple(target["applied_identity"]) != node_ssh_identity(target):
+            return dict(result, error="已保存的托管执行身份与当前目标不一致；未执行写入，请先恢复原身份。")
+        baseline = target.get("_node_baseline")
+        if baseline and baseline.get("execution_identity"):
+            current = node_baseline.capture_node_baseline(target, run_node_script, gateway)
+            if not current.get("ok") or current.get("execution_identity") != baseline["execution_identity"]:
+                return dict(result, error="实际登录账号、UID、HOME 或 shell 已变化或无法核验；未执行配置写入，原基线保留。")
+        restored = action == "off" and not baseline and target.get("_node_restored_baseline")
+        if restored:
+            baseline = restored
+        if not baseline:
+            baseline = node_baseline.capture_node_baseline(target, run_node_script, gateway)
+            if not baseline.get("ok"):
+                return dict(result, error="无法读取节点基线；尚未执行配置写入。")
+            if action == "off" and not (baseline.get("managed", {}).get("state") in ("enabled", "partial", "conflict")
+                                      and baseline.get("managed", {}).get("restoration_manifest")):
+                return dict(result, error="缺少启用前基线或可核验的旧快照；未写入配置，无法宣称已恢复，登记保留。")
+        if not restored:
+            result["_node_baseline"] = baseline
+            target["_node_baseline"] = baseline
+            target["pending_action"] = action
+            target["managed_state"] = "unknown"
+            target["applied_identity"] = list(node_ssh_identity(target))
+            # A failed local save must prevent the remote side effect. On interruption
+            # this persisted baseline makes the operation recoverable after restart.
+            if any(item is target for item in cfg.get("clients", [])):
+                save_config(cfg)
+        script = generate_provisioning_script(gateway_url(gateway) if action == "on" else "",
+                                             cfg.get("no_proxy", "localhost,127.0.0.1"), action,
+                                             owner=target.get("id", ""))
+        completed = (subprocess.CompletedProcess([], 0, "", "") if restored else
+                     run_node_script(target, node_baseline.wrap_login_script(script), timeout=25))
+        if completed.returncode:
+            detail = completed.stderr.lower()
+            reason = ("目标配置存在人工修改；请保留修改并核对快照。" if "edited since" in detail else
+                      "此执行上下文由其它节点持有；未覆盖其配置。" if "owner" in detail else
+                      "旧配置没有可用恢复快照；请先核对基线。" if "legacy" in detail else
+                      "节点配置操作未完成；保留登记与快照供恢复。")
+            return dict(result, error=reason)
+        if action == "on":
+            observed = node_baseline.inspect_node_state(target, run_node_script, gateway)
+            identity_ok = baseline.get("execution_identity") == observed.get("execution_identity")
+            owner_ok = observed.get("managed", {}).get("owner_node_id") == target.get("id")
+            proxy_variables = observed.get("login", {}).get("proxy_variables", {})
+            login_ok = all(proxy_variables.get(key, {}).get("matches_selected_gateway") for key in
+                           ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"))
+            verified = bool(observed.get("ok") and observed.get("managed", {}).get("state") == "enabled"
+                            and identity_ok and owner_ok and login_ok)
+            verification = {"verified": verified, "status": "enabled" if verified else "unknown",
+                            "verification_scope": "login_and_managed_files", "checks": {"managed_enabled": verified,
+                            "identity": identity_ok, "owner": owner_ok, "login_proxy": login_ok}}
+            result.update(managed_state="enabled" if verified else "unknown", verification=verification)
+        else:
+            verification = node_baseline.verify_node_baseline(target, baseline, run_node_script, gateway)
+            verified = bool(verification.get("verified"))
+            safe_verification = {key: verification.get(key) for key in
+                                 ("verified", "status", "verification_scope", "checks")}
+            variables = verification.get("observation", {}).get("login", {}).get("proxy_variables", {})
+            present = [value for key, value in variables.items() if key.lower() != "no_proxy" and value.get("present")]
+            matches = any(value.get("matches_selected_gateway") for value in present)
+            environment = {"context": "fresh_login_shell", "proxy_present": bool(present),
+                           "matches_selected_gateway": matches, "observed": bool(variables)}
+            if matches and gateway:
+                environment["matched_gateway"] = {key: gateway[key] for key in ("id", "host", "port") if key in gateway}
+            safe_verification["restored_environment"] = environment
+            result.update(managed_state="disabled" if verified else "unknown", verification=safe_verification)
+        if verified:
+            result["returncode"] = 0
+            result["_node_baseline"] = baseline
+        else:
+            result["error"] = "配置脚本已结束，但独立登录核验尚未确认结果；登记与恢复基线已保留。"
+    except Exception:
+        result["error"] = "无法完成节点操作或核验；未删除登记，恢复信息已保留。"
     return result
 
 
@@ -601,8 +760,7 @@ def check_node_http(target, gateway=None, target_url=None):
     """Run one curl process so native redirect rules preserve account credentials safely."""
     url = node_probe.validate_url(target_url or DEFAULT_TEST_URL)
     mode = target.get("access_mode") or ("docker_host" if target.get("container_name") and not target.get("port") else "ssh")
-    local = (mode != "docker_host" and is_local_host(target.get("host"))
-             and int(target.get("port") or 22) == 22 and not target.get("container_name"))
+    local = mode == "local"
     transport = "local" if local else ("ssh_docker_exec" if mode == "docker_host" else "ssh")
     started = time.monotonic()
     stages = {"ssh": "skipped" if local else "not_reached",
@@ -619,12 +777,13 @@ def check_node_http(target, gateway=None, target_url=None):
               "exit_evidence": {"status": "not_checked"},
               "tls_policy": "curl_defaults" if gateway else "account_configuration",
               "is_proxy_enabled": bool(target.get("is_proxy_enabled"))}
+    result["execution_context"] = "controller_process" if local and os.name == "nt" else "fresh_login_shell"
     proxy = gateway_url(gateway) if gateway else None
     if proxy:
         result["proxy_url"] = proxy
     try:
         executable = "curl.exe" if local and os.name == "nt" else "curl"
-        if local:
+        if local and os.name == "nt":
             with tempfile.TemporaryDirectory(prefix="npt-curl-headers-") as temporary:
                 headers = Path(temporary) / "headers"
                 command = node_probe.curl_command(executable, url, proxy, output=os.devnull, headers=str(headers))
@@ -634,9 +793,10 @@ def check_node_http(target, gateway=None, target_url=None):
             identity = node_probe.local_identity()
         else:
             command = node_probe.curl_command(executable, url, proxy)
-            res = run_node_script(target, node_probe.remote_script(command), timeout=30)
-            stages["ssh"] = "passed" if "NPT_SSH_READY" in res.stdout else "failed"
-            result["auth_ok"] = stages["ssh"] == "passed"
+            res = run_node_script(target, node_baseline.wrap_login_script(node_probe.remote_script(command)), timeout=30)
+            if not local:
+                stages["ssh"] = "passed" if "NPT_SSH_READY" in res.stdout else "failed"
+                result["auth_ok"] = stages["ssh"] == "passed"
             if mode == "docker_host":
                 stages["docker_exec"] = "passed" if "NPT_EXEC_READY" in res.stdout else "failed"
             identity = None
@@ -644,7 +804,7 @@ def check_node_http(target, gateway=None, target_url=None):
         result.update(exit_code=res.returncode, final_url=observed["final_url"] or node_probe.safe_url(url),
                       code=observed["code"], final_status=observed["code"], peer=observed["peer"],
                       connect_status=observed["connect_status"], ssl_verify_result=observed["ssl_verify_result"])
-        result["execution_identity"] = identity if local else observed["execution_identity"]
+        result["execution_identity"] = identity if local and os.name == "nt" else observed["execution_identity"]
         result["execution_identity"]["curl_config_loaded"] = bool(
             not gateway and result["execution_identity"].get("curl_config"))
         responses = observed["responses"]
@@ -719,6 +879,8 @@ def check_node_requests(target, gateway, target_url):
             expected_proxy={"host": gateway["host"], "port": int(gateway["port"])})
     return dict(ordinary, success=explicit["online"] and ordinary["online"], node_id=target.get("id"),
                 gateway_id=gateway.get("id"), binding_revision=target.get("binding_revision", 0),
+                node_revision=node_revision(target), managed_state=target.get("managed_state", "unknown"),
+                verification=target.get("verification", {"verified": False, "status": "unknown"}),
                 explicit_proxy=explicit, ordinary_request=ordinary,
                 message="指定网关请求：{}；节点普通请求：{}".format(explicit["status_line"], ordinary["status_line"]))
 
@@ -805,76 +967,21 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
             self.path = "/index.html"
             return super().do_GET()
 
-        if path == "/proxy-on":
-            cfg = load_config()
-            gw = resolve_gateway_info(cfg)
-            proxy_url = gateway_url(gw)
-            no_proxy = validate_bypass(cfg.get("no_proxy", "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.local"))
-            script = f"""# Generated by net-proxy-tool
-export HTTP_PROXY="{proxy_url}"
-export HTTPS_PROXY="{proxy_url}"
-export http_proxy="{proxy_url}"
-export https_proxy="{proxy_url}"
-export NO_PROXY="{no_proxy}"
-export no_proxy="{no_proxy}"
-echo "[net-proxy-tool] 出海代理已开启 (出网网关: {gw['host']}:{gw['port']})"
-"""
-            self.send_text(script)
-            return
-
-        if path == "/proxy-off":
-            script = """# Generated by net-proxy-tool
-unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy
-echo "[net-proxy-tool] 已清除当前会话的 HTTP 代理变量"
-"""
-            self.send_text(script)
-            return
-
-        if path == "/container-init.sh":
-            cfg = load_config()
-            gw = resolve_gateway_info(cfg)
-            proxy_url = gateway_url(gw)
-            no_proxy = validate_bypass(cfg.get("no_proxy", "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.local"))
-            script = f"""#!/bin/bash
-# net-proxy-tool: Docker 容器内独立开关一键初始化
-# 纯容器内生效，绝不影响宿主机和其他容器
-
-cat << 'EOF' > /etc/profile.d/net-proxy-switch.sh
-alias proxy-on='export HTTP_PROXY="{proxy_url}" HTTPS_PROXY="{proxy_url}" http_proxy="{proxy_url}" https_proxy="{proxy_url}" NO_PROXY="{no_proxy}" no_proxy="{no_proxy}" && echo "✅ [容器代理] 已开启出海通道 ({gw['host']}:{gw['port']})"'
-alias proxy-off='unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy && echo "[容器代理] 已清除当前会话的 HTTP 代理变量；工具配置与实际请求路径需另行验证"'
-alias proxy-status='env | grep -i proxy || echo "[容器代理] 当前会话未检测到代理变量；这不能证明工具未使用代理"'
-EOF
-
-cat << 'EOF' > /usr/local/bin/with-proxy
-#!/bin/sh
-HTTP_PROXY="{proxy_url}" \\
-HTTPS_PROXY="{proxy_url}" \\
-http_proxy="{proxy_url}" \\
-https_proxy="{proxy_url}" \\
-NO_PROXY="{no_proxy}" \\
-no_proxy="{no_proxy}" \\
-exec "$@"
-EOF
-chmod +x /usr/local/bin/with-proxy 2>/dev/null || true
-
-for f in ~/.bashrc /etc/bash.bashrc; do
-    if [ -f "$f" ]; then
-        grep -q 'net-proxy-switch.sh' "$f" 2>/dev/null || echo '[ -f /etc/profile.d/net-proxy-switch.sh ] && source /etc/profile.d/net-proxy-switch.sh' >> "$f"
-    fi
-done
-
-source /etc/profile.d/net-proxy-switch.sh 2>/dev/null || true
-
-echo "=================================================="
-echo "🎉 [容器环境] 容器内独立代理开关已就绪！"
-echo "在容器内部直接输入以下命令即可随时控制:"
-echo "  proxy-on           # 开启出海代理"
-echo "  proxy-off          # 清除当前会话的 HTTP 代理变量"
-echo "  proxy-status       # 查看代理开关状态"
-echo "  with-proxy <命令>  # 单任务临时走代理 (如 with-proxy pip install ...)"
-echo "=================================================="
-"""
-            self.send_text(script)
+        if path in ("/proxy-on", "/proxy-off", "/container-init.sh"):
+            # Off also works after the configured gateway has been deleted.
+            proxy, bypass = "", ""
+            if path != "/proxy-off":
+                cfg = load_config()
+                proxy = gateway_url(resolve_gateway_info(cfg))
+                bypass = validate_bypass(cfg.get("no_proxy", "localhost,127.0.0.1"))
+            functions = (WEB_DIR / "session_switch.sh").read_text(encoding="utf-8")
+            if path == "/container-init.sh":
+                template = (WEB_DIR / "container_helpers.sh").read_text(encoding="utf-8")
+                script = template.replace("@FUNCTIONS@", functions)
+            else:
+                action = "npt_proxy_on" if path == "/proxy-on" else "npt_proxy_off"
+                script = functions + "\n" + action + "\nunset -f npt_proxy_on npt_proxy_off\n"
+            self.send_text(script.replace("@PROXY@", shlex.quote(proxy)).replace("@BYPASS@", shlex.quote(bypass)))
             return
 
         if path == "/api/health":
@@ -884,7 +991,8 @@ echo "=================================================="
             return
 
         if path == "/api/config":
-            self.send_json(dict(load_config(), default_test_url=DEFAULT_TEST_URL))
+            cfg = load_config()
+            self.send_json(dict(cfg, clients=[node_public_state(node) for node in cfg.get("clients", [])], default_test_url=DEFAULT_TEST_URL))
             return
 
         if path == "/api/audit-logs":
@@ -1020,19 +1128,11 @@ echo "=================================================="
         host = req_json.get("host", "").strip()
         port = int(req_json.get("port", 0))
         proxy = gateway_url({"host": host, "port": port, "protocol": req_json.get("protocol", "http")})
-        ok, tcp_info = check_tcp_port(host, port, timeout=2.5)
         url = req_json.get("target_url") or DEFAULT_TEST_URL
         diagnostic_url(url)
-        if not ok:
-            self.send_json({"success": False, "tcp_ok": False, "online": False, "http_ok": False,
-                            "path_verified": False, "response_received": False, "request_url": url,
-                            "final_url": url, "proxy_url": proxy, "code": None, "redirects": [],
-                            "tls_retries": 0, "tls_retry_reason": None,
-                            "stage": "proxy_tcp", "error_type": "proxy_connection", "error": tcp_info})
-            return
         result = check_http_target("HTTP probe", url, proxy)
         online = result["status"] == "online"
-        self.send_json(dict(result, success=online, tcp_ok=True, online=online, tcp_latency_ms=tcp_info))
+        self.send_json(dict(result, success=online, online=online))
 
     def handle_test_host(self):
         req_json = self.read_json_body()
@@ -1062,6 +1162,18 @@ echo "=================================================="
         password = req_json.get("ssh_pass", "")
         container_name = req_json.get("container_name", "").strip()
         ssh_host = req_json.get("ssh_host", "").strip() or host
+
+        if access_mode == "local":
+            validate_client(dict(req_json, host=host or "localhost", access_mode="local"))
+            if os.name == "nt":
+                self.send_json({"success": True, "auth_ok": None, "execution_identity": node_probe.local_identity(),
+                                "message": "本机模式使用控制台账号，不进行 SSH 登录；Windows 请使用单命令代理。"})
+            else:
+                observed = node_baseline.capture_node_baseline(req_json, run_node_script)
+                self.send_json({"success": observed.get("ok", False), "auth_ok": None,
+                                "execution_identity": observed.get("execution_identity", {}),
+                                "message": "已核对本机执行账号。" if observed.get("ok") else "无法核对本机登录环境。"})
+            return
 
         if access_mode == "docker_host":
             validate_host_port(ssh_host, port)
@@ -1174,244 +1286,214 @@ echo "=================================================="
 
 
     def handle_client_add(self):
-        req_json = self.read_json_body()
-        cid = req_json.get("id", "").strip()
-        name = req_json.get("name", "").strip()
-        host = req_json.get("host", "").strip()
-        os_type = req_json.get("os_type", "linux").strip().lower()
-        bound_gw = req_json.get("bound_gateway_id", "").strip()
-        tags = req_json.get("tags", [])
-        desc = req_json.get("description", "").strip()
-
-        if not name or not host:
-            self.send_json({"success": False, "error": "节点名称和主机IP不能为空"}, status_code=400)
-            return
-
-        if not cid:
-            # Auto-generate ID if empty
-            safe_slug = re.sub(r"[^a-zA-Z0-9-]", "", host.replace(".", "-"))
-            cid = f"node-{safe_slug}"
-
+        request = self.read_json_body()
         cfg = load_config()
-        clients = cfg.get("clients", [])
-
-        # Check existing ID
-        for c in clients:
-            if c.get("id") == cid:
-                self.send_json({"success": False, "error": f"节点ID '{cid}' 已存在，请更换"}, status_code=400)
+        fields = ("id", "name", "host", "port", "os_type", "access_mode", "auth_type", "ssh_user", "ssh_pass",
+                  "ssh_host", "container_name", "bound_gateway_id", "tags", "description")
+        target = {key: copy.deepcopy(request[key]) for key in fields if key in request}
+        if not target.get("name") or not target.get("host"):
+            raise ValueError("节点名称和主机地址不能为空")
+        target.setdefault("access_mode", "ssh")
+        target.setdefault("auth_type", "key")
+        target.setdefault("port", 22)
+        target.setdefault("os_type", "linux")
+        target.setdefault("bound_gateway_id", "")
+        target["port"] = int(target["port"])
+        validate_client(target, cfg)
+        identity = management_identity(target)
+        for existing in cfg.get("clients", []):
+            if management_identity(existing) == identity:
+                self.send_json({"success": True, "existing": True, "client": node_public_state(existing),
+                                "message": "该执行身份已经登记，原记录、绑定和状态均已保留；修改请使用编辑。"})
                 return
-
-        new_client = {
-            "id": cid,
-            "name": name,
-            "host": host,
-            "port": int(req_json.get("port", 22)),
-            "os_type": os_type,
-            "access_mode": req_json.get("access_mode", "ssh").strip().lower(),
-            "auth_type": req_json.get("auth_type", "key").strip().lower(),
-            "bound_gateway_id": bound_gw,
-            "is_proxy_enabled": False,
-            "tags": tags if isinstance(tags, list) else [t.strip() for t in str(tags).split(",") if t.strip()],
-            "description": desc
-        }
-        if "ssh_user" in req_json and req_json["ssh_user"]:
-            new_client["ssh_user"] = req_json["ssh_user"].strip()
-        if "ssh_pass" in req_json and req_json["ssh_pass"]:
-            new_client["ssh_pass"] = req_json["ssh_pass"]
-        if "container_name" in req_json:
-            new_client["container_name"] = req_json["container_name"].strip()
-        if "ssh_host" in req_json:
-            new_client["ssh_host"] = req_json["ssh_host"].strip()
-
-        validate_client(new_client, cfg)
-        clients.append(new_client)
-        cfg["clients"] = clients
+        archived = next((item for item in cfg.get("archived_clients", [])
+                         if management_identity(item) == identity), None)
+        if archived:
+            current_auth = {key: target[key] for key in ("auth_type", "ssh_user", "ssh_pass") if key in target}
+            target = dict(archived_node(archived), **target)
+            target["id"] = archived["id"]
+            target.update(current_auth)
+            if not request.get("bound_gateway_id"):
+                previous = archived.get("bound_gateway_id")
+                target["bound_gateway_id"] = previous if previous and resolve_gateway_info(cfg, previous) else ""
+        if not target.get("id"):
+            slug = re.sub(r"[^a-zA-Z0-9-]", "", target["host"].replace(".", "-")) or "local"
+            suffix = str(target["port"]) + ("-" + target.get("container_name", "") if target["access_mode"] == "docker_host" else "")
+            stem = "node-{}-{}".format(slug, suffix)
+            target["id"] = stem
+            used = {item.get("id") for item in cfg.get("clients", [])}
+            index = 2
+            while target["id"] in used:
+                target["id"] = stem + "-" + str(index)
+                index += 1
+        if any(item.get("id") == target["id"] for item in cfg.get("clients", [])):
+            raise NodeBindingConflict("节点 ID 已存在，请更换。")
+        if target.get("access_mode") == "local" or target.get("auth_type") == "key":
+            target.pop("ssh_pass", None)
+        if target.get("access_mode") == "local":
+            target["auth_type"] = "key"
+        if target.get("auth_type") == "password" and not target.get("ssh_pass"):
+            raise ValueError("请为当前身份重新输入密码；已删除节点的凭据不会恢复。")
+        target.update(identity_version=1, lifecycle_version=1, node_revision=int(target.get("node_revision", -1)) + 1,
+                      is_proxy_enabled=False, managed_state="unknown")
+        target["verification"] = {"verified": False, "status": "unknown", "verification_scope": "not_checked"}
+        cfg.setdefault("clients", []).append(target)
+        if archived:
+            cfg["archived_clients"] = [item for item in cfg.get("archived_clients", []) if item is not archived]
         save_config(cfg)
-        write_audit_log("client_add", cid, "success", f"添加节点: {name} ({host}:{new_client['port']})")
-        self.send_json({"success": True, "message": "业务节点添加成功", "client": new_client})
+        write_audit_log("client_add", target["id"], "success", "节点登记已保存")
+        self.send_json({"success": True, "restored_registration": bool(archived), "client": node_public_state(target),
+                        "message": "原节点登记和可用绑定已恢复；认证资料使用本次输入。" if archived else "节点登记已保存，尚未开启代理。"})
 
     def handle_client_update(self):
-        req_json = self.read_json_body()
-        cid = req_json.get("id", "").strip()
-        if not cid:
-            self.send_json({"success": False, "error": "节点ID不能为空"}, status_code=400)
-            return
-
+        request = self.read_json_body()
         cfg = load_config()
-        clients = cfg.get("clients", [])
-        target = None
-        for c in clients:
-            if c.get("id") == cid:
-                target = c
-                break
-
-        if not target:
-            self.send_json({"success": False, "error": f"未找到ID为 '{cid}' 的业务节点"}, status_code=404)
+        target = next((item for item in cfg.get("clients", []) if item.get("id") == request.get("id")), None)
+        if target is None:
+            self.send_json({"success": False, "error": "节点不存在"}, 404)
             return
-
-        if target.get("ssh_pass") and not req_json.get("ssh_pass"):
-            draft = dict(target, **req_json)
-            if node_ssh_identity(draft) != node_ssh_identity(target):
-                raise ValueError("节点地址或身份已更改；请重新输入该目标的密码，不能复用原节点凭据")
-
-        previous_binding = target.get("bound_gateway_id") or ""
-        if "binding_revision" in req_json and req_json["binding_revision"] != target.get("binding_revision", 0):
-            raise NodeBindingConflict("节点绑定版本已变化，请刷新后重试。")
-        if "name" in req_json: target["name"] = req_json["name"].strip()
-        if "host" in req_json: target["host"] = req_json["host"].strip()
-        if "port" in req_json: target["port"] = int(req_json["port"])
-        if "os_type" in req_json: target["os_type"] = req_json["os_type"].strip().lower()
-        if "access_mode" in req_json: target["access_mode"] = req_json["access_mode"].strip().lower()
-        if "auth_type" in req_json: target["auth_type"] = req_json["auth_type"].strip().lower()
-        if "ssh_user" in req_json: target["ssh_user"] = req_json["ssh_user"].strip()
-        if req_json.get("ssh_pass"): target["ssh_pass"] = req_json["ssh_pass"]
-        if "bound_gateway_id" in req_json: target["bound_gateway_id"] = req_json["bound_gateway_id"].strip()
-        if "container_name" in req_json: target["container_name"] = req_json["container_name"].strip()
-        if "ssh_host" in req_json: target["ssh_host"] = req_json["ssh_host"].strip()
-        if "tags" in req_json:
-            t = req_json["tags"]
-            target["tags"] = t if isinstance(t, list) else [x.strip() for x in str(t).split(",") if x.strip()]
-        if "description" in req_json: target["description"] = req_json["description"].strip()
-
-        validate_client(target, cfg)
-        if (target.get("bound_gateway_id") or "") != previous_binding:
-            target["binding_revision"] = target.get("binding_revision", 0) + 1
-            if target.get("is_proxy_enabled"):
-                target.setdefault("applied_gateway_id", previous_binding)
+        require_node_revision(target, request)
+        draft = copy.deepcopy(target)
+        allowed = ("name", "host", "port", "os_type", "access_mode", "auth_type", "ssh_user", "ssh_host",
+                   "container_name", "bound_gateway_id", "tags", "description")
+        for key in allowed:
+            if key in request:
+                draft[key] = copy.deepcopy(request[key])
+        if request.get("ssh_pass"):
+            draft["ssh_pass"] = request["ssh_pass"]
+        draft["port"] = int(draft.get("port") or 22)
+        validate_client(draft, cfg)
+        unique_node_identity(draft, cfg, excluding=target["id"])
+        old_identity, new_identity = node_ssh_identity(target), node_ssh_identity(draft)
+        if legacy_local_identity(target):
+            if not request.get("confirm_execution_mode") or draft.get("access_mode") != "local":
+                raise ValueError("此旧记录此前按本机执行。请先明确保存为本机模式并完成恢复，再改为 SSH 身份。")
+            if (int(draft.get("port") or 22) != int(target.get("port") or 22)
+                    or any(draft.get(key) != target.get(key) for key in ("host", "container_name"))):
+                raise ValueError("确认旧本机执行位置时，请先保留原地址与账号字段。")
+            if "ssh_user" in target:
+                draft["ssh_user"] = target["ssh_user"]
+            else:
+                draft.pop("ssh_user", None)
+            draft["identity_version"] = 1
+            old_identity = new_identity
+        if draft.get("access_mode") == "local" or draft.get("auth_type") == "key":
+            draft.pop("ssh_pass", None)
+        if target.get("ssh_pass") and draft.get("auth_type") == "password" and draft.get("access_mode") != "local" and old_identity != new_identity and not request.get("ssh_pass"):
+            raise ValueError("节点地址或身份已更改；请重新输入该目标的密码，不能复用原节点凭据")
+        if old_identity != new_identity and needs_node_restoration(target):
+            result = apply_node_proxy(target, "off", cfg)
+            update_node_outcome(target, "off", result)
+            save_config(cfg)
+            if result.get("returncode") != 0:
+                self.send_json({"success": False, "error": result.get("error"), "client": node_public_state(target),
+                                "message": "原身份未确认恢复，节点身份没有修改。"}, 502)
+                return
+            for key in ("_node_baseline", "_node_restored_baseline", "pending_action", "applied_identity", "applied_gateway_id"):
+                draft.pop(key, None)
+            draft.update(is_proxy_enabled=False, managed_state="unknown", lifecycle_version=1,
+                         verification={"verified": False, "status": "unknown"})
+        if draft.get("bound_gateway_id", "") != target.get("bound_gateway_id", ""):
+            draft["binding_revision"] = target.get("binding_revision", 0) + 1
+            draft["managed_state"] = "unknown"
+            draft["verification"] = {"verified": False, "status": "unknown", "verification_scope": "binding_changed"}
+        draft["node_revision"] = node_revision(target) + 1
+        draft.setdefault("identity_version", 1)
+        target.clear()
+        target.update(draft)
         save_config(cfg)
-        write_audit_log("client_update", cid, "success", f"更新节点: {target['name']}")
-        self.send_json({"success": True, "message": "业务节点更新成功", "client": target})
+        write_audit_log("client_update", target["id"], "success", "节点登记已更新")
+        self.send_json({"success": True, "client": node_public_state(target), "message": "节点登记已更新。"})
 
     def handle_client_delete(self):
-        req_json = self.read_json_body()
-        cid = req_json.get("id", "").strip()
-        if not cid:
-            self.send_json({"success": False, "error": "节点ID不能为空"}, status_code=400)
-            return
-
+        request = self.read_json_body()
         cfg = load_config()
-        clients = cfg.get("clients", [])
-        new_clients = [c for c in clients if c.get("id") != cid]
-
-        if len(new_clients) == len(clients):
-            self.send_json({"success": False, "error": f"未找到ID为 '{cid}' 的业务节点"}, status_code=404)
+        target = next((item for item in cfg.get("clients", []) if item.get("id") == request.get("id")), None)
+        if target is None:
+            self.send_json({"success": False, "error": "节点不存在"}, 404)
             return
-
-        cfg["clients"] = new_clients
+        require_node_revision(target, request)
+        if needs_node_restoration(target):
+            result = apply_node_proxy(target, "off", cfg)
+            update_node_outcome(target, "off", result)
+            save_config(cfg)
+            if result.get("returncode") != 0:
+                self.send_json({"success": False, "error": result.get("error"), "client": node_public_state(target),
+                                "message": "恢复未核验通过，节点登记和认证资料仍保留。"}, 502)
+                return
+        archive = archived_node(target)
+        cfg["archived_clients"] = [item for item in cfg.get("archived_clients", []) if item.get("id") != target["id"]] + [archive]
+        cfg["clients"] = [item for item in cfg["clients"] if item is not target]
         save_config(cfg)
-        write_audit_log("client_delete", cid, "success", f"删除业务节点: {cid}")
-        self.send_json({"success": True, "message": "业务节点删除成功", "id": cid})
+        write_audit_log("client_delete", target["id"], "success", "节点登记已移除，认证资料已删除")
+        self.send_json({"success": True, "id": target["id"], "message": "节点登记已移除，认证资料已删除；仅保留加回所需的非敏感登记信息。"})
 
     def handle_node_switch(self):
-        req_json = self.read_json_body()
-        node_id = req_json.get("node_id", "").strip()
-        action = req_json.get("action", "on").strip().lower()
-
+        request = self.read_json_body()
         cfg = load_config()
-        clients = cfg.get("clients", [])
-        target = None
-        for c in clients:
-            if c.get("id") == node_id:
-                target = c
-                break
-
-        if not target:
-            self.send_json({"success": False, "error": f"未找到节点 {node_id}"}, status_code=404)
+        target = next((item for item in cfg.get("clients", []) if item.get("id") == request.get("node_id")), None)
+        if target is None:
+            self.send_json({"success": False, "error": "节点不存在"}, 404)
             return
-
-        gw = selected_node_gateway(target, cfg, req_json)
+        require_node_revision(target, request)
+        action = request.get("action", "on")
         if action not in ("on", "off"):
             raise ValueError("无效的节点操作")
-        dispatch_result = apply_node_proxy(target, action, cfg)
-
-        if dispatch_result.get("returncode") != 0:
-            detail = dispatch_result.get("error") or dispatch_result.get("stderr") or "下发失败"
-            write_audit_log(f"node_switch_{action}", node_id, "failed", detail)
-            self.send_json({"success": False, "action": action, "error": detail, "message": detail}, 502)
-            return
-        # 更新节点配置状态
-        target["is_proxy_enabled"] = (action == "on")
-        target["applied_gateway_id"] = gw.get("id") if action == "on" else None
+        if action == "on":
+            selected_node_gateway(target, cfg, request)
+            if not target.get("bound_gateway_id"):
+                raise ValueError("开启前必须保存此节点的网关绑定。")
+        result = apply_node_proxy(target, action, cfg)
+        update_node_outcome(target, action, result)
         save_config(cfg)
-
-        msg = (
-            f"✅ 节点【{target['name']}】已应用代理配置。请在目标终端验证请求结果。"
-            if action == "on"
-            else f"🛑 节点【{target['name']}】已关闭托管代理。存在快照的配置已恢复。"
-        )
-
-        status_flag = "success" if dispatch_result.get("returncode", 0) == 0 else "failed"
-        write_audit_log(f"node_switch_{action}", node_id, status_flag, msg)
-
-        self.send_json({
-            "success": True,
-            "action": action,
-            "node_id": node_id,
-            "is_proxy_enabled": target["is_proxy_enabled"],
-            "gateway": f"{gw['host']}:{gw['port']}" if gw else None,
-            "gateway_id": gw.get("id"),
-            "binding_revision": target.get("binding_revision", 0),
-            "dispatch_result": dispatch_result,
-            "message": msg
-        })
+        ok = result.get("returncode") == 0
+        write_audit_log("node_switch_" + action, target["id"], "success" if ok else "failed", "节点操作已核验" if ok else "核验未确认，登记保留")
+        self.send_json({"success": ok, "node_id": target["id"], "action": action,
+                        "node_revision": node_revision(target), "binding_revision": target.get("binding_revision", 0),
+                        "gateway_id": target.get("bound_gateway_id"), "is_proxy_enabled": target.get("is_proxy_enabled", False),
+                        "managed_state": target["managed_state"], "verification": target["verification"],
+                        "dispatch_result": result, "error": result.get("error"),
+                        "message": ("已核验托管配置开启。" if action == "on" else "已核验恢复启用前基线，原有代理仍可能生效。") if ok else result.get("error")}, 200 if ok else 502)
 
     def handle_batch_switch(self):
-        """
-        Batch switch all nodes to proxy ON or OFF (One-click full disconnection to restore direct link).
-        """
-        req_json = self.read_json_body()
-        action = req_json.get("action", "off").strip().lower()
-        if action not in ("on", "off"):
-            raise ValueError("无效的节点操作")
-
+        request = self.read_json_body()
+        action, selections = request.get("action"), request.get("nodes")
+        if action not in ("on", "off") or not isinstance(selections, list) or not selections:
+            raise ValueError("批量操作必须明确提交节点列表和各自版本。")
         cfg = load_config()
-        clients = cfg.get("clients", [])
+        selected, ids = [], set()
+        # Validate the whole selection before the first target can be changed.
+        for selection in selections:
+            if not isinstance(selection, dict) or selection.get("node_id") in ids:
+                raise ValueError("批量节点列表包含无效或重复条目")
+            target = next((item for item in cfg.get("clients", []) if item.get("id") == selection.get("node_id")), None)
+            if target is None:
+                raise NodeBindingConflict("批量列表中的节点已移除，请刷新。")
+            require_node_revision(target, selection)
+            require_execution_identity(target)
+            if action == "on":
+                selected_node_gateway(target, cfg, selection)
+                if not target.get("bound_gateway_id"):
+                    raise ValueError("开启前每个节点都必须保存网关绑定。")
+            ids.add(target["id"])
+            selected.append(target)
         results = []
-
-        for target in clients:
-            cid = target.get("id")
+        for target in selected:
             try:
-                res = apply_node_proxy(target, action, cfg)
-                ok = res.get("returncode") == 0
-                if ok:
-                    target["is_proxy_enabled"] = (action == "on")
-                    gateway = resolve_gateway_info(cfg, target.get("bound_gateway_id"))
-                    target["applied_gateway_id"] = gateway.get("id") if action == "on" else None
-                results.append({
-                    "node_id": cid,
-                    "name": target.get("name"),
-                    "success": ok,
-                    "action": action,
-                    "error": res.get("error") or res.get("stderr")
-                })
-                write_audit_log(f"batch_{action}", cid, "success" if ok else "failed", res.get("stderr", ""))
-            except Exception as e:
-                results.append({
-                    "node_id": cid,
-                    "name": target.get("name"),
-                    "success": False,
-                    "action": action,
-                    "error": str(e)
-                })
-                write_audit_log(f"batch_{action}", cid, "error", str(e))
-
-        save_config(cfg)
-        success_count = sum(1 for r in results if r["success"])
-        total_count = len(results)
-
-        msg = (
-            f"🛑 已完成 {success_count}/{total_count} 个节点的关闭操作。"
-            if action == "off"
-            else f"⚡ 已完成 {success_count}/{total_count} 个节点的启用操作。"
-        )
-        self.send_json({
-            "success": success_count == total_count,
-            "action": action,
-            "total": total_count,
-            "success_count": success_count,
-            "results": results,
-            "message": msg
-        })
+                result = apply_node_proxy(target, action, cfg)
+            except Exception:
+                result = {"returncode": 1, "error": "节点操作未完成，登记保留。", "managed_state": "unknown"}
+            update_node_outcome(target, action, result)
+            save_config(cfg)
+            ok = result.get("returncode") == 0
+            results.append({"node_id": target["id"], "name": target.get("name", target["id"]), "success": ok,
+                            "managed_state": target["managed_state"], "verification": target["verification"],
+                            "node_revision": node_revision(target), "error": result.get("error")})
+            write_audit_log("batch_" + action, target["id"], "success" if ok else "failed", "已核验" if ok else "未核验")
+        count = sum(item["success"] for item in results)
+        self.send_json({"success": count == len(results), "action": action, "results": results,
+                        "total": len(results), "success_count": count,
+                        "message": "已核验完成 {}/{} 个明确选择节点的操作。".format(count, len(results))})
 
     def handle_nodes_health_check_all(self):
         """Inspect ordinary and explicitly proxied requests without changing node state."""
@@ -1420,14 +1502,14 @@ echo "=================================================="
         cfg = load_config()
         clients = cfg.get("clients", [])
         def check_one(target):
-            gateway = resolve_gateway_info(cfg, target.get("bound_gateway_id"))
+            gateway = resolve_gateway_info(cfg, target["bound_gateway_id"]) if target.get("bound_gateway_id") else {}
             return target.get("id"), check_node_requests(target, gateway, url)
         with ThreadPoolExecutor(max_workers=5) as executor:
             health_map = dict(executor.map(check_one, clients))
         current = load_config()
         for target in clients:
             present = next((item for item in current.get("clients", []) if item.get("id") == target.get("id")), None)
-            if (present is None or present.get("bound_gateway_id") != target.get("bound_gateway_id")
+            if (present is None or node_revision(present) != node_revision(target) or present.get("bound_gateway_id") != target.get("bound_gateway_id")
                     or present.get("binding_revision", 0) != target.get("binding_revision", 0)
                     or resolve_gateway_info(current, target.get("bound_gateway_id")) != resolve_gateway_info(cfg, target.get("bound_gateway_id"))):
                 health_map[target["id"]].update(binding_changed=True, online=False, success=False,
@@ -1461,7 +1543,7 @@ echo "=================================================="
         result = check_node_requests(target, gateway, url)
         current = load_config()
         present = next((item for item in current.get("clients", []) if item.get("id") == node_id), None)
-        if (present is None or present.get("bound_gateway_id") != target.get("bound_gateway_id")
+        if (present is None or node_revision(present) != node_revision(target) or present.get("bound_gateway_id") != target.get("bound_gateway_id")
                 or present.get("binding_revision", 0) != target.get("binding_revision", 0)
                 or resolve_gateway_info(current, target.get("bound_gateway_id")) != gateway):
             raise NodeBindingConflict("测试期间节点绑定已变化，请重新测试。")
@@ -1543,6 +1625,7 @@ echo "=================================================="
             self.send_json({"success": False, "error": f"未找到ID为 '{gid}' 的网关"}, status_code=404)
             return
 
+        previous_endpoint = tuple(str(target.get(key, "http" if key == "protocol" else "")) for key in ("host", "port", "protocol"))
         if "name" in req_json: target["name"] = req_json["name"].strip()
         if "host" in req_json: target["host"] = req_json["host"].strip()
         if "port" in req_json: target["port"] = int(req_json["port"])
@@ -1550,6 +1633,13 @@ echo "=================================================="
         if "description" in req_json: target["description"] = req_json["description"].strip()
 
         gateway_url(target)
+        if previous_endpoint != tuple(str(target.get(key, "http" if key == "protocol" else "")) for key in ("host", "port", "protocol")):
+            for node in cfg.get("clients", []):
+                if node.get("bound_gateway_id") == gid:
+                    node["node_revision"] = node_revision(node) + 1
+                    node["binding_revision"] = node.get("binding_revision", 0) + 1
+                    node["managed_state"] = "unknown"
+                    node["verification"] = {"verified": False, "status": "unknown", "verification_scope": "gateway_changed"}
         save_config(cfg)
         self.send_json({"success": True, "message": "代理网关更新成功", "gateway": target})
 

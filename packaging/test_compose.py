@@ -68,7 +68,10 @@ def main():
         node["bound_gateway_id"] = cfg["gateways"][0]["id"]
         assert api(port, "/api/clients/add", node)["success"]
         for action in ("on", "off"):
-            switched = api(port, "/api/node-switch", {"node_id": node["id"], "action": action})
+            current = next(c for c in api(port, "/api/config")["clients"] if c['id'] == node['id'])
+            switched = api(port, "/api/node-switch", {"node_id": node["id"], "action": action,
+                "node_revision": current['node_revision'], "gateway_id": current['bound_gateway_id'],
+                "binding_revision": current.get('binding_revision', 0)})
             assert switched.get("success"), switched
             content = run(["docker", "exec", target, "cat", "/home/tester/.curlrc"])
             assert (("fixture-ssh:7890" in content) if action == "on" else (content == "silent")), content

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import tempfile
 import threading
@@ -29,6 +30,7 @@ class NodeRequestTests(unittest.TestCase):
                            {'id': 'second', 'host': '127.0.0.1', 'port': 9002}]
         cfg['active_gateway_id'] = 'first'
         cfg['clients'] = [{'id': 'node', 'name': 'fixture', 'host': '127.0.0.1',
+                           'access_mode': 'local', 'identity_version': 1, 'lifecycle_version': 1,
                            'bound_gateway_id': 'first', 'is_proxy_enabled': False}]
         save_config(cfg)
 
@@ -42,6 +44,12 @@ class NodeRequestTests(unittest.TestCase):
         return instance
 
     def api(self, path, body):
+        if path in ('/api/clients/update', '/api/clients/delete', '/api/node-switch'):
+            body = dict(body)
+            node = next((item for item in load_config().get('clients', [])
+                         if item['id'] == body.get('node_id', body.get('id'))), None)
+            if node:
+                body.setdefault('node_revision', node.get('node_revision', 0))
         conn = http.client.HTTPConnection(*self.web.server_address, timeout=20)
         try:
             conn.request('POST', path, json.dumps(body), {'Content-Type': 'application/json'})
@@ -107,6 +115,11 @@ class NodeRequestTests(unittest.TestCase):
                                                    tcp='passed', tls='skipped', http='passed'))
             command, script, _ = remote.call_args.args
             self.assertIn("printf 'NPT_SSH_READY", command[-1])
+            # Inspect the fixed curl request after decoding the fresh-login shell argument.
+            self.assertIn('exec "$shell" -lic ', script)
+            script = shlex.split(script.split('exec "$shell" -lic ', 1)[1])[0]
+            self.assertIn('exec /bin/sh -c ', script)
+            script = shlex.split(script.split('exec /bin/sh -c ', 1)[1])[0]
             self.assertIn('--proxy http://proxy.invalid:3128', script)
             self.assertIn("--noproxy ''", script)
             self.assertIn('curl -q ', script)
@@ -138,7 +151,7 @@ class NodeRequestTests(unittest.TestCase):
         env = {k: '' for k in ('http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
                               'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY')}
         with patch.dict(os.environ, env):
-            result = server.check_node_http({'host': '127.0.0.1'},
+            result = server.check_node_http({'host': '127.0.0.1', 'access_mode': 'local'},
                                             target_url=f'http://127.0.0.1:{origin.server_port}/[1-2]')
         self.assertEqual(result['code'], 302, result)
         self.assertEqual(result['first_status'], 302)

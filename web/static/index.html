@@ -6,8 +6,8 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>Net-Proxy-Tool 通用跨平台局域网出海与 Docker 容器隔离控制中心 (v1.4.2)</title>
-  <link rel="stylesheet" href="style.css?v=1.4.2">
+  <title>Net-Proxy-Tool 通用跨平台局域网出海与 Docker 容器隔离控制中心 (v1.4.3)</title>
+  <link rel="stylesheet" href="style.css?v=1.4.3">
 </head>
 <body>
   <div class="app-layout">
@@ -16,7 +16,7 @@
       <div class="navbar-brand">
         <span class="brand-icon">🚀</span>
         <div class="brand-info">
-          <h1>Net-Proxy-Tool <span class="tag-version">v1.4.2</span></h1>
+          <h1>Net-Proxy-Tool <span class="tag-version">v1.4.3</span></h1>
           <p class="brand-sub">HTTP 代理控制台</p>
         </div>
       </div>
@@ -70,9 +70,10 @@
               </div>
             <button class="btn btn-primary" id="setup-test" type="button">发送代理请求</button>
             </fieldset>
-            <output id="setup-result" role="status" aria-live="polite">正在读取网关配置…</output>
+             <div id="setup-result" role="status" aria-live="polite">正在读取网关配置…</div>
             <button id="setup-reload" class="btn btn-secondary" type="button" hidden>重新读取配置</button>
-            <p id="setup-command" hidden></p>
+             <p id="setup-command" hidden></p>
+             <button id="setup-compare" class="btn btn-secondary" type="button" hidden>用系统 curl 复测同一 GET</button>
           </form>
         </section>
         <details id="advanced-wizard"><summary>为远程机器或容器配置代理</summary>
@@ -133,8 +134,14 @@
                 设为全局默认网关
               </button>
             </div>
-            <div class="step-result-banner" id="step-1-result">
+            <div class="step-result-banner" id="step-1-result" role="status" aria-live="polite">
               <span class="res-msg">点击【探测连通性】以验证网关端口与服务是否可用。验证成功后将自动解锁步骤 2。</span>
+            </div>
+            <div id="wizard-probe-actions" class="probe-actions" hidden>
+              <button id="wizard-compare" type="button" class="btn btn-secondary">用系统 curl 复测同一 GET</button>
+              <label>已绑定此网关的节点<select id="wizard-readonly-node" class="form-select"></select></label>
+              <button id="wizard-readonly-test" type="button" class="btn btn-secondary">从节点只读诊断</button>
+              <p id="wizard-readonly-output" role="status"></p>
             </div>
           </section>
 
@@ -384,10 +391,10 @@
             </div>
             <div class="header-actions">
               <button class="btn btn-secondary" id="top-enable-all-btn" title="一键将列表中的所有节点切换为出海状态">
-                <span class="btn-icon">⚡</span> 一键全部出海
+                <span class="btn-icon">⚡</span> 开启当前列表节点
               </button>
               <button class="btn btn-danger-soft" id="top-disable-all-btn" title="按各节点启用前的快照恢复配置">
-                <span class="btn-icon">🛑</span> 停止全部节点托管
+                <span class="btn-icon">🛑</span> 恢复当前列表基线
               </button>
               <button class="btn btn-secondary" id="top-health-check-btn" title="对所有节点并发探测出海状态与延迟">
                 <span class="btn-icon">🔄</span> 全网巡检
@@ -422,7 +429,8 @@
                 <option value="docker">🐳 仅 Docker 容器</option>
                 <option value="linux">🐧 仅 Linux 物理机 / 工作站</option>
                 <option value="proxy_on">仅托管记录已开启</option>
-                <option value="proxy_off">🛑 仅托管记录已关闭</option>
+                <option value="unknown">未核验</option>
+                  <option value="proxy_off">🛑 仅托管记录已关闭</option>
               </select>
             </div>
             <div class="node-stats-pill" id="node-stats-badge">正在读取节点</div>
@@ -553,7 +561,7 @@ with ProxySession():
 
     <!-- 页脚 -->
     <footer class="app-footer">
-      <span>Net-Proxy-Tool v1.4.2 · HTTP 代理控制台</span>
+      <span>Net-Proxy-Tool v1.4.3 · HTTP 代理控制台</span>
       <span>当前出网网关: <strong id="footer-gw-label">未配置</strong></span>
     </footer>
   </div>
@@ -600,6 +608,7 @@ with ProxySession():
         <div class="form-group">
           <label>节点运维与下发通道 *:</label>
           <select id="form-client-access-mode" class="form-select">
+            <option value="local">本机执行（使用运行控制台的账号）</option>
             <option value="ssh">🚀 通用 SSH 直连接入 (推荐：支持物理工作站、工控机、边缘设备及映射端口容器)</option>
             <option value="docker_host">🐳 宿主机 Docker 穿透接入 (向下兼容：适用于未暴露 SSH 的轻量微服务容器)</option>
           </select>
@@ -633,7 +642,7 @@ with ProxySession():
           <div class="form-group" id="form-group-client-pass" style="display: none;">
             <label>SSH 登录密码</label>
             <input type="password" id="form-client-ssh-pass" class="form-input" placeholder="输入远程账号密码">
-            <div class="input-tip-sub">Windows 控制端请使用 SSH 密钥。Linux / macOS 控制端首次以密码开启代理时，如有本机 SSH 公钥，会尝试加入目标账号的 authorized_keys。验证密钥登录成功后，才移除已保存的密码。</div>
+            <div class="input-tip-sub">Windows、Linux 与 macOS 均支持已核验主机密钥的 SSH 密钥或密码登录。密码只用于此处明确的地址、端口与账号；修改身份时需重新输入，不会自动注册公钥。编辑时密码留空表示沿用原身份已保存的密码。</div>
           </div>
         </div>
 
@@ -774,6 +783,6 @@ with ProxySession():
     </div>
   </div>
 
-  <script src="app.js?v=1.4.2"></script>
+  <script src="app.js?v=1.4.3"></script>
 </body>
 </html>

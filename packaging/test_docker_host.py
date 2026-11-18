@@ -15,6 +15,8 @@ from pathlib import Path
 
 from smoke import api
 from test_node_requests import FIXTURE, main as run_ssh_requests
+from test_node_baseline import main as run_baselines
+from test_docker_proxy_cli import main as run_docker_cli
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = "python:3.12-alpine"
@@ -161,7 +163,9 @@ DisableForwarding yes
                    "target_url": "http://fixture:8080/health"}
         for action, increase in [(None, 1), ("on", 2), ("off", 1)]:
             if action:
-                result = api(port, "/api/node-switch", dict(payload, action=action))
+                current = next(c for c in api(port, "/api/config")['clients'] if c['id'] == node['id'])
+                result = api(port, "/api/node-switch", dict(payload, action=action,
+                    node_revision=current['node_revision'], binding_revision=current.get('binding_revision', 0)))
                 assert result.get("success"), result
             if action == "on":
                 assert "fixture:7890" in invoke("docker", "exec", target, "cat", "/root/.curlrc")
@@ -189,6 +193,8 @@ DisableForwarding yes
             print("SSH -> Docker", action or "before activation", "recorded proxy requests", expected_proxy_hits)
         # The same already-built images exercise account-local CURL_HOME/XDG precedence and restoration.
         run_ssh_requests(node_image, prefix)
+        run_baselines(node_image)
+        run_docker_cli(node_image)
     print("Real SSH -> Docker requests, target restoration, and neighboring-container/host isolation passed.")
 
 

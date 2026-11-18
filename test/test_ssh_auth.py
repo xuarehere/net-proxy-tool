@@ -60,9 +60,11 @@ class SSHAuthTests(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
         self.target = dict(id='node', name='fixture', host='node.invalid', port=2222, ssh_user='tester',
-                           auth_type='password', ssh_pass='fixture-secret', access_mode='ssh')
+                           auth_type='password', ssh_pass='fixture-secret', access_mode='ssh',
+                           identity_version=1, lifecycle_version=1, bound_gateway_id='g')
         cfg = load_config()
         cfg['clients'] = [self.target]
+        cfg['gateways'] = [dict(id='g', host='proxy.invalid', port=3128)]
         save_config(cfg)
 
     def test_password_bridge_is_secret_free_and_scoped(self):
@@ -112,7 +114,7 @@ class SSHAuthTests(unittest.TestCase):
 
     def test_identity_edit_requires_an_explicit_new_password(self):
         handler = object.__new__(server.ProxyConsoleHandler)
-        request = dict(id='node', host='different.invalid', ssh_pass='')
+        request = dict(id='node', host='different.invalid', ssh_pass='', node_revision=0)
         handler.read_json_body = lambda: request
         handler.send_json = lambda *args, **kwargs: None
         with self.assertRaises(ValueError):
@@ -144,13 +146,20 @@ class SSHAuthTests(unittest.TestCase):
                 self.assertIn('NPT_SSH_READY', execute.call_args.kwargs['remote_command'])
                 if mode == 'docker_host':
                     self.assertIn('docker exec -i -u 0 worker sh', execute.call_args.kwargs['remote_command'])
-        with patch.object(server, 'run_node_script', return_value=subprocess.CompletedProcess([], 0, '', '')) as execute:
+        baseline = {'ok': True, 'execution_identity': {'user': 'tester'}}
+        with patch.object(server, 'run_node_script', return_value=subprocess.CompletedProcess([], 0, '', '')) as execute, \
+                patch.object(server.node_baseline, 'capture_node_baseline', return_value=baseline), \
+                patch.object(server.node_baseline, 'inspect_node_state', return_value=dict(baseline,
+                             managed={'state': 'enabled', 'owner_node_id': 'node'},
+                             login={'proxy_variables': {key: {'matches_selected_gateway': True} for key in
+                                    ('http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY')}})):
             cfg = dict(gateways=[dict(id='g', host='proxy.invalid', port=3128)], active_gateway_id='g')
             original = dict(self.target)
             result = server.apply_node_proxy(self.target, 'on', cfg)
             self.assertEqual(result['returncode'], 0)
             execute.assert_called_once()
-            self.assertEqual(self.target, original)
+            self.assertEqual(self.target['ssh_pass'], original['ssh_pass'])
+            self.assertEqual(self.target['_node_baseline'], baseline)
 
     def test_key_auth_requires_trusted_host_and_cannot_prompt_password(self):
         with patch.object(server, 'ssh_with_script') as execute:

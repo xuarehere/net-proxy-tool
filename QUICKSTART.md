@@ -21,6 +21,8 @@ shasum -a 256 net-proxy-tool-macos-arm64.tar.gz
 sha256sum net-proxy-tool-linux-x64.tar.gz
 ```
 
+向导显示“请求失败”时，展开详情查看最后尝试的主机、TLS 和最终 HTTP。收到 302 后在下一站超时，本次访问仍是失败。可用界面的 GET 复测命令核对同一网关和原始网址。
+
 ## 2. 解压并启动
 
 - **Windows** · 右键 ZIP → 全部解压，打开其中的 `net-proxy-tool`，双击 `Start.bat`。需要查看启动消息时，在该目录的 PowerShell 中运行 `.\Start.bat`。

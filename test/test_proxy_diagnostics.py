@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from web import server
 from sdk.config import load_config
+import gateway_tls_fixture
 
 
 class RecordingProxy(BaseHTTPRequestHandler):
@@ -111,13 +112,18 @@ class ProxyDiagnosticsTests(unittest.TestCase):
         self.assertEqual(self.probe("slow", timeout=0.03)["error_type"], "timeout")
 
     def test_connect_auth_and_tls_verification(self):
-        result = server.check_http_target("tls", "https://target.invalid/", self.url)
-        self.assertEqual(result["code"], 407)
-        self.assertEqual(result["error_type"], "proxy_auth")
-        self.assertFalse(result["response_received"])
-        self.assertTrue(result["tcp_ok"])
-        self.assertEqual(result["tls_retries"], 0)
-        self.assertEqual(len(self.proxy.hits), 1)
+        for status, error in [(407, "proxy_auth"), (502, "proxy_tunnel")]:
+            self.proxy.connect_code = status
+            result = server.check_http_target("tls", "https://target.invalid/", self.url)
+            self.assertEqual(result["code"], status)  # v1.4.2 compatibility
+            self.assertEqual(result["attempts"][-1]["connect_status"], status)
+            self.assertIsNone(result["first_status"])
+            self.assertIsNone(result["final_status"])
+            self.assertEqual(result["error_type"], error)
+            self.assertFalse(result["response_received"] or result["path_verified"])
+            self.assertTrue(result["tcp_ok"])
+            self.assertEqual(result["tls_retries"], 0)
+        self.assertEqual(len(self.proxy.hits), 2)
         self.proxy.connect_code = 200
         context = ssl.create_default_context()
         self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
@@ -127,7 +133,25 @@ class ProxyDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result["error_type"], "tls_certificate")
         self.assertFalse(result["http_ok"])
         self.assertEqual(result["tls_retries"], 0)
-        self.assertEqual(len(self.proxy.hits), 2)
+        self.assertEqual(len(self.proxy.hits), 3)
+
+    def test_verified_tls_redirects_then_final_handshake_timeout(self):
+        with gateway_tls_fixture.redirect_then_stall() as proxy:
+            result = server.check_http_target("redirect", gateway_tls_fixture.START,
+                                              f"http://127.0.0.1:{proxy.server_port}", timeout=2)
+        self.assertEqual(proxy.log, gateway_tls_fixture.EXPECTED_LOG)
+        self.assertEqual([a["tls"] for a in result["attempts"]], ["eof", "passed", "passed", "timeout"])
+        self.assertEqual([a["http_status"] for a in result["attempts"]], [None, 302, 302, None])
+        self.assertEqual([a["hop"] for a in result["attempts"]], [1, 1, 2, 3])
+        self.assertEqual([a["connect_status"] for a in result["attempts"]], [200] * 4)
+        self.assertEqual([r["location"] for r in result["redirects"]], [gateway_tls_fixture.SECOND, gateway_tls_fixture.FINAL])
+        self.assertEqual(result["first_status"], 302)
+        self.assertIsNone(result["final_status"])
+        self.assertEqual(result["error_type"], "timeout")
+        self.assertEqual(result["stage"], "tls")
+        self.assertEqual(result["final_url"], gateway_tls_fixture.FINAL)
+        self.assertTrue(result["budget_expired"])
+        self.assertFalse(result["http_ok"] or result["response_received"])
 
     def tls_fixture(self, outcomes, suffix="final", first_handshake_seconds=5):
         """Keep CONNECT/GET real and inject only the TLS handshake outcome."""

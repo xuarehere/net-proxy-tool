@@ -1,6 +1,7 @@
 """Exercise the public Web UI in Chromium with two recording proxies and isolated node dispatch."""
 import argparse
 from contextlib import ExitStack, contextmanager
+from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 from pathlib import Path
@@ -12,6 +13,8 @@ from unittest.mock import patch
 from playwright.sync_api import expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "test"))
+import gateway_tls_fixture
 from sdk.config import load_config, save_config
 from web import server
 
@@ -59,6 +62,63 @@ def public_home(browser, url, screenshot):
         if screenshot and theme == "dark" and width == 1280:
             page.screenshot(path=str(screenshot))
         page.close()
+
+
+def gateway_failure_flow(page, url):
+    """Run the wizard through a real EOF, trusted TLS redirects and a stalled last hop."""
+    with gateway_tls_fixture.redirect_then_stall() as proxy:
+        cfg = load_config()
+        gateway = dict(id="tls-fixture", name="TLS fixture", host="127.0.0.1", port=proxy.server_port, protocol="http")
+        cfg["gateways"].append(gateway)
+        cfg["clients"] = [dict(id="fixture-node", name="Fixture node", host="fixture.invalid",
+                               access_mode="ssh", os_type="linux", bound_gateway_id=gateway["id"])]
+        save_config(cfg)
+        page.goto(url)
+        page.locator("#advanced-wizard > summary").click()
+        page.locator("#wizard-gw-select").select_option(gateway["id"])
+        target = page.locator("#wizard-test-url")
+        target.fill(gateway_tls_fixture.START)
+        test = page.locator("#wizard-test-gw-btn")
+        result = page.locator("#step-1-result")
+        with patch.object(server, "check_http_target", partial(server.check_http_target, timeout=2)):
+            with page.expect_response("**/api/test-gateway") as response:
+                test.click()
+        body = response.value.json()
+        expect(result.locator("strong")).to_have_text(gateway_tls_fixture.FINAL + " 的TLS 握手超时，未取得最终 HTTP 响应")
+        result.locator("summary").click()
+        for evidence in ("TLS 握手 EOF", "第 1 跳（重试）", gateway_tls_fixture.SECOND,
+                         "第 3 跳", "首跳 HTTP 302 → 未收到最终 HTTP 状态"):
+            expect(result).to_contain_text(evidence)
+        assert proxy.log == gateway_tls_fixture.EXPECTED_LOG
+        assert page.locator("#card-step-2").evaluate("el => el.inert")
+        before = load_config()
+        with patch.object(server, "check_node_requests", return_value={"message": "只读请求已完成"}) as checked:
+            page.locator("#wizard-readonly-test").click()
+            expect(page.locator("#wizard-readonly-output")).to_contain_text("只读请求已完成")
+        assert checked.call_args.args[0]["id"] == "fixture-node"
+        assert checked.call_args.args[1]["id"] == gateway["id"]
+        assert checked.call_args.args[2] == gateway_tls_fixture.START
+        assert load_config() == before
+        page.locator("#wizard-compare").click()
+        expect(page.locator("#sb-gw-override-select")).to_have_value(gateway["id"])
+        expect(page.locator("#sb-cmd-input")).to_have_value(gateway_tls_fixture.START)
+        page.locator('[data-tab="tab-wizard"]').click()
+        pending = []
+        page.route("**/api/test-gateway", lambda route: pending.append(route))
+        with page.expect_request("**/api/test-gateway"):
+            test.click()
+        target.fill(gateway_tls_fixture.FINAL)
+        target.fill(gateway_tls_fixture.START)
+        with page.expect_request("**/api/test-gateway"):
+            test.click()
+        assert len(pending) == 2
+        pending[1].fulfill(json=body)
+        expect(result.locator("strong")).to_contain_text("TLS 握手超时")
+        with page.expect_request_finished(lambda request: request.url.endswith("/api/test-gateway")):
+            pending[0].fulfill(json={"online": True, "code": 200, "http_ok": True})
+        expect(page.locator("#status-tag-step-1")).to_have_text("目标请求未成功")
+        assert page.locator("#card-step-2").evaluate("el => el.inert")
+        page.unroute("**/api/test-gateway")
 
 
 def run(screenshot=None):
@@ -140,7 +200,8 @@ def run(screenshot=None):
         form("setup-test").click()
         expect(form("setup-result")).to_contain_text("HTTP 403")
         expect(form("setup-result")).to_contain_text("TCP 已连接")
-        expect(form("setup-command")).to_be_hidden()
+        expect(form("setup-command")).to_contain_text("http://browser-fixture.invalid/forbidden")
+        expect(form("setup-compare")).to_be_visible()
 
         cfg = load_config()
         assert len(cfg["gateways"]) == 2
@@ -224,7 +285,7 @@ def run(screenshot=None):
             dialog.dismiss()
         page.once("dialog", cancel_batch)
         form("top-disable-all-btn").click()
-        assert "启用前的配置" in prompts[0] and "原有代理可能继续生效" in prompts[0]
+        assert "启用前基线" in prompts[0] and "原有代理可能继续生效" in prompts[0]
         node = page.locator('tr', has=page.locator('[data-action="test-node-out"][data-id="node-two"]'))
         check = node.locator('[data-action="test-node-out"]')
         settings = node.locator("[data-node-target]")
@@ -282,13 +343,14 @@ def run(screenshot=None):
             expect(form("sb-diag-rate-val")).to_have_text("HTTP 200")
             assert gw.requests[before:] == [FINAL]
         cfg = load_config()
-        cfg["clients"][1].update(os_type="windows", host="127.0.0.1")
+        cfg["clients"][1].update(os_type="windows", host="127.0.0.1", access_mode="local")
         save_config(cfg)
         page.reload()
         page.locator('[data-tab="tab-topology"]').click()
         form("top-clients-tbody").locator('[data-action="toggle-client"][data-id="node-two"]').click()
         expect(form("tab-sandbox")).to_be_visible()
         expect(form("sb-gw-override-select")).to_have_value(gateways[1].gateway_id)
+        gateway_failure_flow(page, url)
         assert not errors, errors
 
 

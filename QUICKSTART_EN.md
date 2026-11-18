@@ -21,6 +21,8 @@ shasum -a 256 net-proxy-tool-macos-arm64.tar.gz
 sha256sum net-proxy-tool-linux-x64.tar.gz
 ```
 
+If a request fails, expand the result to see the last host attempted, TLS stage and final HTTP status. A redirect followed by a timeout leaves the request incomplete. Copy the GET command to check the same gateway and original URL.
+
 ## 2. Extract and start
 
 - **Windows** · Right-click the ZIP, choose **Extract All**, open the extracted `net-proxy-tool` folder and double-click `Start.bat`. To see startup messages, run `.\Start.bat` from PowerShell in the same folder.

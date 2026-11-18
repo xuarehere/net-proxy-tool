@@ -37,6 +37,12 @@ class ManagementTests(unittest.TestCase):
         return httpd
 
     def api(self, path, data=None, status=200, port=None):
+        if data is not None and path in ('/api/clients/update', '/api/clients/delete', '/api/node-switch'):
+            data = dict(data)
+            node = next((item for item in load_config().get('clients', [])
+                         if item['id'] == data.get('node_id', data.get('id'))), None)
+            if node:
+                data.setdefault('node_revision', node.get('node_revision', 0))
         connection = http.client.HTTPConnection('127.0.0.1', port or self.web.server_port, timeout=15)
         try:
             connection.request('GET' if data is None else 'POST', path,
@@ -69,20 +75,26 @@ class ManagementTests(unittest.TestCase):
     def test_batch_partial_failures_keep_state_and_have_per_node_audit(self):
         self.gateway('gateway')
         for id in ('ok', 'refused', 'exception'):
-            self.api('/api/clients/add', {'id': id, 'name': id, 'host': 'fixture.invalid',
+            self.api('/api/clients/add', {'id': id, 'name': id, 'host': id + '.fixture.invalid',
                                         'bound_gateway_id': 'gateway'})
         dispatched = []
         def dispatch(target, action, config):
             dispatched.append((target['id'], action, target['bound_gateway_id']))
             if target['id'] == 'exception':
                 raise OSError('isolated transport error')
-            return {'returncode': 0 if target['id'] == 'ok' else 1, 'stderr': 'isolated refusal'}
+            success = target['id'] == 'ok'
+            return {'returncode': 0 if success else 1, 'error': None if success else 'isolated refusal',
+                    'managed_state': ('enabled' if action == 'on' else 'disabled') if success else 'unknown',
+                    'verification': {'verified': success, 'status': 'verified' if success else 'unknown'}}
+        def selections():
+            return [{'node_id': node['id'], 'node_revision': node.get('node_revision', 0)}
+                    for node in load_config()['clients']]
         with patch.object(server, 'apply_node_proxy', side_effect=dispatch):
-            enabled = self.api('/api/nodes/batch-switch', {'action': 'on'})
+            enabled = self.api('/api/nodes/batch-switch', {'action': 'on', 'nodes': selections()})
             self.assertEqual((enabled['success'], enabled['success_count'], enabled['total']), (False, 1, 3))
             states = {c['id']: c['is_proxy_enabled'] for c in load_config()['clients']}
             self.assertEqual(states, {'ok': True, 'refused': False, 'exception': False})
-            disabled = self.api('/api/nodes/batch-switch', {'action': 'off'})
+            disabled = self.api('/api/nodes/batch-switch', {'action': 'off', 'nodes': selections()})
             self.assertEqual(disabled['success_count'], 1)
         self.assertEqual(dispatched, [(id, action, 'gateway') for action in ('on', 'off')
                                       for id in ('ok', 'refused', 'exception')])
@@ -91,7 +103,7 @@ class ManagementTests(unittest.TestCase):
         observed = {(row['action'], row['node_id']): row['status'] for row in logs}
         for action in ('batch_on', 'batch_off'):
             self.assertEqual({id: observed[(action, id)] for id in ('ok', 'refused', 'exception')},
-                             {'ok': 'success', 'refused': 'failed', 'exception': 'error'})
+                             {'ok': 'success', 'refused': 'failed', 'exception': 'failed'})
 
     def test_legacy_fields_survive_updates_and_are_not_returned(self):
         self.gateway('gateway')

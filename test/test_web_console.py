@@ -34,6 +34,12 @@ class TestWebConsole(unittest.TestCase):
         return listener
 
     def request(self, path, data=None, headers=None):
+        if data is not None and path in ('/api/clients/update', '/api/clients/delete', '/api/node-switch'):
+            data = dict(data)
+            node = next((item for item in load_config().get('clients', [])
+                         if item['id'] == data.get('node_id', data.get('id'))), None)
+            if node:
+                data.setdefault('node_revision', node.get('node_revision', 0))
         conn = http.client.HTTPConnection(*self.web.server_address, timeout=6)
         try:
             conn.request("GET" if data is None else "POST", path,
@@ -105,14 +111,20 @@ class TestWebConsole(unittest.TestCase):
                 data = self.request(path, payload)[1]
                 self.assertFalse(data.get("health_map", {}).get("c", data)["online"])
                 self.assertEqual(run.call_args.args[0][1:3], ["-p", "2222"])
+        baseline = {'ok': True, 'managed': {'state': 'enabled', 'restoration_manifest': {'fixture': 'fingerprint'}}}
+        verified = {'verified': True, 'status': 'restored', 'verification_scope': 'managed_files_only', 'checks': {}}
+        with patch.object(server.node_baseline, 'capture_node_baseline', return_value=baseline), \
+                patch.object(server.node_baseline, 'verify_node_baseline', return_value=verified), \
+                patch.object(server, 'run_node_script', return_value=subprocess.CompletedProcess([], 0, '', '')) as run:
             self.assertTrue(self.request("/api/node-switch", {"node_id": "c", "action": "off"})[1]["success"])
-            self.assertTrue(run.call_args.kwargs["input"].startswith(b"action=off\n"))
+            self.assertEqual(run.call_args.args[0]['access_mode'], 'docker_host')
+            self.assertIn('action=off', run.call_args.args[1])
 
     def test_cross_origin_and_password(self):
         self.assertEqual(self.request("/api/config", headers={"Host": "rebind.invalid"})[0], 403)
         self.assertEqual(self.request("/api/config", {}, {"Origin": "https://foreign.invalid"})[0], 403)
         self.assertEqual(self.request("/api/shutdown", {})[0], 403)
-        payload = {"id": "node", "name": "test", "host": "test.invalid", "ssh_pass": "q'$42"}
+        payload = {"id": "node", "name": "test", "host": "test.invalid", "auth_type": "password", "ssh_pass": "q'$42"}
         self.assertNotIn("ssh_pass", self.request("/api/clients/add", payload)[1]["client"])
         self.assertNotIn("ssh_pass", self.request("/api/config")[1]["clients"][0])
         self.request("/api/clients/update", {"id": "node", "name": "new", "ssh_pass": ""})
@@ -125,7 +137,8 @@ class TestWebConsole(unittest.TestCase):
             status, body = self.request("/api/node-switch", {"node_id": "c", "action": "on"})
             self.assertEqual(status, 502)
             self.assertFalse(body["success"])
-            _, batch = self.request("/api/nodes/batch-switch", {"action": "on"})
+            _, batch = self.request("/api/nodes/batch-switch", {"action": "on", 'nodes': [
+                {'node_id': 'c', 'node_revision': load_config()['clients'][0]['node_revision']}]})
             self.assertFalse(batch["success"])
         self.assertFalse(load_config()["clients"][0]["is_proxy_enabled"])
 

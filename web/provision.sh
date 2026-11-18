@@ -2,6 +2,7 @@
 set -eu
 umask 077
 state="$HOME/.local/state/net-proxy-tool"
+npt_owner=${npt_owner-}
 case "$HOME" in /*) ;; *) echo 'A non-empty absolute HOME is required.' >&2; exit 1 ;; esac
 if [ ! -e "$state/env/applied" ] && {
     grep -qs '^export HTTP_PROXY=' "$HOME/.net-proxy-switch.sh" ||
@@ -22,16 +23,98 @@ fi
 if [ "$action" = off ] && [ ! -d "$state" ]; then
     exit 0
 fi
+missing_state_dirs=''
+parent=$state
+while [ ! -e "$parent" ]; do
+    missing_state_dirs="$missing_state_dirs
+$parent"
+    parent=$(dirname "$parent")
+done
+for parent in "$HOME/.local" "$HOME/.local/state" "$state"; do
+    if [ -L "$parent" ]; then echo 'Refusing a symbolic link in the snapshot directory.' >&2; exit 1; fi
+done
 mkdir -p "$state"
 mkdir "$state/lock" || { echo "Another switch is in progress ($state/lock)." >&2; exit 1; }
-trap 'rmdir "$state/lock"' EXIT
+
+metadata() { stat -c '%a:%u:%g' "$1" 2>/dev/null || stat -f '%Lp:%u:%g' "$1"; }
+same_file() { cmp -s "$1" "$2" && [ "$(metadata "$1")" = "$(metadata "$2")" ]; }
+transaction=$(mktemp -d "$state/.transaction.XXXXXX")
+finish() {
+    result=$?
+    set +e
+    trap - EXIT HUP INT TERM
+    if [ "$result" -ne 0 ] && [ -f "$transaction/journal" ]; then
+        # All pre-write copies remain until every target has been applied.
+        while IFS= read -r rollback_key; do
+            rollback_file=$(cat "$transaction/file-$rollback_key.path")
+            if [ -f "$transaction/file-$rollback_key.before" ]; then
+                cp -p "$transaction/file-$rollback_key.before" "$rollback_file" || echo 'Rollback needs operator review.' >&2
+            else rm -f "$rollback_file" || echo 'Rollback needs operator review.' >&2; fi
+        done < "$transaction/journal"
+    fi
+    for temporary in "$transaction"/*; do [ ! -f "$temporary" ] || rm -f "$temporary"; done
+    rmdir "$transaction" 2>/dev/null || :
+    rmdir "$state/lock" 2>/dev/null || :
+    if [ "$result" -eq 0 ] && [ "$action" = off ] && [ -n "${cleanup_dirs-}" ]; then
+        printf '%s\n' "$cleanup_dirs" | while IFS= read -r directory; do
+            [ -z "$directory" ] || rmdir "$directory" 2>/dev/null || :
+        done
+    fi
+    exit "$result"
+}
+trap finish EXIT
+trap 'exit 130' HUP INT TERM
 
 # Snapshot paths stay bound to the execution account and the original HOME.
 uid=$(id -u)
+state_uid=$(metadata "$state"); state_uid=${state_uid#*:}; state_uid=${state_uid%%:*}
+if [ "$state_uid" != "$uid" ]; then echo 'The snapshot directory belongs to another execution UID.' >&2; exit 1; fi
+for item in owner-uid owner-node-id snapshot-id .activation; do
+    if [ -L "$state/$item" ]; then echo 'Refusing a symbolic link in snapshot metadata.' >&2; exit 1; fi
+done
 if [ -f "$state/owner-uid" ] && [ "$(cat "$state/owner-uid")" != "$uid" ]; then
     echo "This snapshot belongs to another execution UID. Use the original account to restore it." >&2
     exit 1
 fi
+if [ -n "$npt_owner" ] && [ -f "$state/owner-node-id" ] && [ "$(cat "$state/owner-node-id")" != "$npt_owner" ]; then
+    for owned in "$state"/*/applied "$state"/*/original "$state"/*/absent; do
+        if [ -f "$owned" ]; then
+            echo 'Another node registration owns this activation. Restore it using the original registration.' >&2; exit 1
+        fi
+    done
+fi
+
+# Preserve pre-existing state metadata too. A prior empty state directory is not
+# permission to remove it or rewrite its historical owner record permanently.
+if [ "$action" = on ] && [ ! -d "$state/.activation" ]; then
+    mkdir "$state/.activation"
+    for name in owner-uid owner-node-id snapshot-id; do
+        if [ -f "$state/$name" ]; then cp -p "$state/$name" "$state/.activation/$name.original"
+        else : > "$state/.activation/$name.absent"; fi
+    done
+    for name in curlrc curl-active wgetrc pip git env .bashrc .profile .bash_profile .bash_login zprofile system-curl system-pip system-git apt; do
+        old_dir="$state/$name"
+        if [ -f "$old_dir/path" ] && [ ! -f "$old_dir/original" ] && [ ! -f "$old_dir/absent" ] &&
+           [ ! -f "$old_dir/applied" ] && [ ! -f "$old_dir/next" ]; then
+            cp -p "$old_dir/path" "$state/.activation/previous-$name-path.original"
+        fi
+    done
+    printf '%s\n' "$missing_state_dirs" > "$state/.activation/created-dirs"
+    : > "$state/.activation/created-snapshots"
+    od -An -N16 -tx1 /dev/urandom | tr -d ' \n' > "$state/snapshot-id"
+fi
+
+ensure_parent() {
+    # Record only directories actually created by this activation, never remove
+    # a pre-existing directory or a non-empty directory containing user data.
+    wanted=$1
+    if [ -d "$wanted" ]; then return; fi
+    absent=''
+    while [ ! -d "$wanted" ]; do absent="$absent
+$wanted"; wanted=$(dirname "$wanted"); done
+    mkdir -p "$1"
+    if [ -f "$state/.activation/created-dirs" ]; then printf '%s\n' "$absent" >> "$state/.activation/created-dirs"; fi
+}
 
 # Curl stops at the first readable configuration in this search order.
 curl_file="$HOME/.curlrc"
@@ -51,6 +134,13 @@ fi
 manage() {
     key=$1 file=$2 kind=$3
     dir="$state/$key"
+    if [ -L "$dir" ]; then echo 'Refusing a symbolic link in a file snapshot.' >&2; exit 1; fi
+    if [ -d "$dir" ] && [ ! -w "$dir" ]; then echo 'Snapshot directory is not writable; no target was changed.' >&2; exit 1; fi
+    for item in original applied absent next restore path; do
+        if [ -L "$dir/$item" ]; then echo 'Refusing a symbolic link in a file snapshot.' >&2; exit 1; fi
+    done
+    case "$file" in *'
+'*) echo 'Newlines in managed paths are unsupported.' >&2; exit 1 ;; esac
     if [ "$action" = off ] && [ ! -d "$dir" ]; then return; fi
     if [ -f "$dir/path" ] && [ "$(cat "$dir/path")" != "$file" ]; then
         echo "Snapshot path changed: $file. Restore using the original context." >&2; exit 1
@@ -61,18 +151,18 @@ manage() {
     if [ -f "$dir/original" ] && [ -f "$dir/absent" ]; then
         echo "Conflicting snapshot records: $dir. Review them before restoring." >&2; exit 1
     fi
-    if [ -e "$dir/applied" ]; then
+    if [ "$stage" != commit ] && [ -e "$dir/applied" ]; then
         if [ ! -f "$dir/original" ] && [ ! -f "$dir/absent" ]; then
             echo "Missing restoration baseline: $dir. No overwrite is authorized." >&2; exit 1
         fi
-        if ! cmp -s "$file" "$dir/applied" && ! { [ -f "$dir/next" ] && cmp -s "$file" "$dir/next"; }; then
+        if ! same_file "$file" "$dir/applied" && ! { [ -f "$dir/next" ] && same_file "$file" "$dir/next"; }; then
             echo "Edited since activation: $file. Original snapshot: $dir" >&2; exit 1
         fi
-    elif { [ -f "$dir/original" ] && ! cmp -s "$file" "$dir/original"; } ||
-         { [ -f "$dir/absent" ] && [ -e "$file" ]; }; then
+    elif [ "$stage" != commit ] && { { [ -f "$dir/original" ] && ! same_file "$file" "$dir/original"; } ||
+         { [ -f "$dir/absent" ] && [ -e "$file" ]; }; }; then
         # A failed preparation can leave snapshots without applied files. Do not
         # mistake a subsequent operator edit for something that we may overwrite.
-        if ! { [ -f "$dir/next" ] && cmp -s "$file" "$dir/next"; }; then
+        if ! { [ -f "$dir/next" ] && same_file "$file" "$dir/next"; }; then
             echo "Edited since snapshot preparation: $file. Original snapshot: $dir" >&2; exit 1
         fi
     fi
@@ -89,6 +179,11 @@ manage() {
         fi
     fi
     if [ "$stage" = check ]; then return; fi
+    if [ "$stage" = apply ]; then
+        printf '%s\n' "$file" > "$transaction/file-$key.path"
+        if [ -f "$file" ]; then cp -p "$file" "$transaction/file-$key.before"; fi
+        printf '%s\n' "$key" >> "$transaction/journal"
+    fi
     if [ "$action" = off ]; then
         # An interrupted snapshot with neither baseline record cannot authorize deletion.
         if [ ! -f "$dir/original" ] && [ ! -f "$dir/absent" ]; then return; fi
@@ -96,20 +191,29 @@ manage() {
             if [ -f "$dir/original" ]; then cp -p "$dir/original" "$dir/restore"; fi
             return
         fi
-        if [ -f "$dir/original" ]; then cp -p "$dir/restore" "$file"; else rm -f "$file"; fi
+        if [ "$stage" = apply ]; then
+            if [ -f "$dir/original" ]; then cp -p "$dir/restore" "$file"; else rm -f "$file"; fi
+            return
+        fi
         rm -f "$dir/original" "$dir/applied" "$dir/absent" "$dir/next" "$dir/restore" "$dir/pip.tmp" "$dir/path"
-        rmdir "$dir"
+        if [ -f "$state/.activation/previous-$key-path.original" ]; then
+            cp -p "$state/.activation/previous-$key-path.original" "$dir/path"
+        fi
+        if [ ! -f "$state/.activation/created-snapshots" ] || grep -qxF "$key" "$state/.activation/created-snapshots"; then rmdir "$dir" 2>/dev/null || :; fi
         return
     fi
+    if [ "$stage" = commit ]; then mv "$dir/next" "$dir/applied"; return; fi
     if [ "$stage" = apply ]; then
-        mkdir -p "$(dirname "$file")"
+        ensure_parent "$(dirname "$file")"
         cp -p "$dir/next" "$file"
-        mv "$dir/next" "$dir/applied"
         return
     fi
+    if [ ! -d "$dir" ] && [ -f "$state/.activation/created-snapshots" ]; then printf '%s\n' "$key" >> "$state/.activation/created-snapshots"; fi
     mkdir -p "$dir"
     printf '%s\n' "$file" > "$dir/path"
     printf '%s\n' "$uid" > "$state/owner-uid"
+    if [ -n "$npt_owner" ]; then printf '%s\n' "$npt_owner" > "$state/owner-node-id"; fi
+    if [ ! -f "$state/snapshot-id" ]; then od -An -N16 -tx1 /dev/urandom | tr -d ' \n' > "$state/snapshot-id"; fi
     if [ ! -e "$dir/original" ] && [ ! -e "$dir/absent" ]; then
         if [ -f "$file" ]; then cp -p "$file" "$dir/original"; else : > "$dir/absent"; fi
     fi
@@ -140,21 +244,25 @@ manage() {
                            /^# --- NET-PROXY-TOOL-END ---$/ {inside=0; next}
                            !inside {print}
                            ' "$dir/original"
-                   fi; } > "$next" ;;
+                   fi
+                   printf '\n%s\n' '[ -r "$HOME/.net-proxy-switch.sh" ] && . "$HOME/.net-proxy-switch.sh"'
+                 } > "$next" ;;
     esac
 }
 
 # Every next file must be generated successfully before the first target write.
-for stage in check prepare apply; do
+for stage in check prepare apply commit; do
     manage curlrc "$HOME/.curlrc" curl
     if [ "$curl_file" != "$HOME/.curlrc" ]; then manage curl-active "$curl_file" curl; fi
     manage wgetrc "$HOME/.wgetrc" wget
     manage pip "$HOME/.config/pip/pip.conf" pip
     if command -v git >/dev/null 2>&1 || [ "$action" = off ]; then manage git "$HOME/.gitconfig" git; fi
     manage env "$HOME/.net-proxy-switch.sh" env
-    for name in .bashrc .profile .bash_profile; do
-        if [ -f "$HOME/$name" ] || [ -d "$state/$name" ]; then manage "$name" "$HOME/$name" profile; fi
+    for name in .bashrc .profile .bash_profile .bash_login; do
+        if [ "$name" = .profile ] || [ -f "$HOME/$name" ] || [ -d "$state/$name" ]; then manage "$name" "$HOME/$name" profile; fi
     done
+    if [ "$action" = off ] && [ -f "$state/zprofile/path" ]; then manage zprofile "$(cat "$state/zprofile/path")" profile
+    else case "${NPT_BASELINE_SHELL-}" in */zsh) manage zprofile "${ZDOTDIR:-$HOME}/.zprofile" profile ;; esac; fi
     if [ "$(id -u)" = 0 ]; then
         # Standard curl does not read /etc/curlrc. Only restore/update an old managed snapshot.
         if [ -d "$state/system-curl" ]; then manage system-curl /etc/curlrc curl; fi
@@ -163,3 +271,13 @@ for stage in check prepare apply; do
         if [ -d /etc/apt/apt.conf.d ]; then manage apt /etc/apt/apt.conf.d/99net-proxy apt; fi
     fi
 done
+rm -f "$transaction/journal"
+if [ "$action" = off ] && [ -d "$state/.activation" ]; then
+    cleanup_dirs=$(awk 'NF {paths[++n]=$0} END {for(i=1;i<=n;i++) print paths[i]}' "$state/.activation/created-dirs")
+    for name in owner-uid owner-node-id snapshot-id; do
+        if [ -f "$state/.activation/$name.original" ]; then cp -p "$state/.activation/$name.original" "$state/$name"
+        elif [ -f "$state/.activation/$name.absent" ]; then rm -f "$state/$name"; fi
+    done
+    for file in "$state/.activation"/*; do [ ! -f "$file" ] || rm -f "$file"; done
+    rmdir "$state/.activation"
+fi

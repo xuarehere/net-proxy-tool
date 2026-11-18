@@ -78,3 +78,11 @@ If the peer closes a TLS handshake before the GET is sent, the gateway probe rec
 | Settings disappear after upgrade | Verify the configuration search order, including the old program directory, account and `NET_PROXY_CONFIG`. |
 
 `GET /api/health` reports the service name, version, PID and status. To check the gateway itself, send a proxied request to a target from the console.
+
+## Verify restoration from a fresh SSH login
+
+Before enabling a worker, open a fresh SSH login as its configured user and run ordinary `curl https://www.google.com/`. Open another login after enabling it. After disabling it, disconnect and repeat from a fresh login. If the first response is 302, run `curl -L` separately to see where the redirect ends. Compare the socket peer, HTTP response and curl exit code.
+
+Disable restores the files and environment captured before activation. A system login script can still supply the original proxy. Check the registration status, restoration evidence and request result separately. Review reported differences if the identity changed, the baseline is missing or a file has been edited. Restore an active worker before deletion or changing its execution identity, and check the displayed selection before a batch operation.
+
+The downloadable session scripts also preserve the original proxy variables. The optional container helper installer stops on a path collision. Run the same installer with `--uninstall` to remove helpers whose contents still match the installed copies.

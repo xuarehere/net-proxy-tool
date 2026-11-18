@@ -44,7 +44,9 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Verify multi-gateway and node selection in Chromium
         if: matrix.target == 'windows-x64' || matrix.target == 'linux-x64'
-        run: python -X utf8 packaging/test_browser_console.py
+        run: |
+          python -X utf8 packaging/test_browser_console.py
+          python -X utf8 packaging/test_browser_lifecycle.py
       - name: Launch from a clean archive and configure a real local test proxy
         run: |
           mkdir -p "build/中文 Portable"
