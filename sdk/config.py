@@ -9,17 +9,45 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "1.4.1"
+VERSION = "1.4.2"
+DEFAULT_TEST_URL = "https://www.google.com/"
 NO_PROXY = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,*.local"
-TARGETS = {
-    "Google": "https://www.google.com",
-    "GitHub": "https://github.com",
-    "Raw GitHub": "https://raw.githubusercontent.com",
-    "HuggingFace": "https://huggingface.co",
-    "PyPI": "https://pypi.org",
-    "OpenAI API": "https://api.openai.com",
-    "YouTube": "https://www.youtube.com",
+# Both tables shipped in v1.4.1: generated settings used the site name as
+# description, while config.example.json contained translated descriptions.
+# Compare the complete table before upgrading, including user-edited metadata.
+_LEGACY_SITES = {
+    "Google": ("https://www.google.com", "全球互联网基础连通", "基础服务"),
+    "GitHub": ("https://github.com", "源码拉取与托管", "研发必备"),
+    "Raw GitHub": ("https://raw.githubusercontent.com", "脚本与发行包直连", "研发必备"),
+    "HuggingFace": ("https://huggingface.co", "开源 AI 模型权重下载", "AI/大模型"),
+    "PyPI": ("https://pypi.org", "Python 官方包索引与依赖", "包管理"),
+    "OpenAI API": ("https://api.openai.com", "大语言模型 API 接口", "AI/大模型"),
+    "YouTube": ("https://www.youtube.com", "高吞吐流媒体/视音频数据", "多媒体"),
 }
+
+TARGETS = {
+    "Google": DEFAULT_TEST_URL,
+    "Claude": "https://claude.ai/",
+    "ChatGPT": "https://chatgpt.com/",
+    "YouTube": "https://www.youtube.com/",
+    "Gemini": "https://gemini.google.com/",
+    **{name: spec[0] for name, spec in _LEGACY_SITES.items() if name not in ("Google", "YouTube")},
+}
+
+
+def diagnostic_defaults(saved=None):
+    targets = {name: {"url": url, "desc": name, "category": "HTTPS"} for name, url in TARGETS.items()}
+    if saved is None:
+        return targets
+    old_example = {name: {"url": url, "desc": desc, "category": category}
+                   for name, (url, desc, category) in _LEGACY_SITES.items()}
+    old_generated = {name: {"url": data["url"], "desc": name, "category": "HTTPS"}
+                     for name, data in old_example.items()}
+    if saved != old_example and saved != old_generated:
+        return saved
+    for name, data in saved.items():
+        targets[name] = dict(data, url=TARGETS[name])
+    return targets
 
 
 def config_path():
@@ -79,11 +107,13 @@ def load_config():
     path = config_path()
     cfg = {"version": VERSION, "active_gateway_id": "", "gateways": [], "clients": [],
            "web_port": 8899, "no_proxy": NO_PROXY,
-           "diagnostic_targets": {name: {"url": url, "desc": name, "category": "HTTPS"}
-                                  for name, url in TARGETS.items()}}
+           "diagnostic_targets": diagnostic_defaults()}
     try:
         with path.open(encoding="utf-8-sig") as stream:
-            cfg.update(_validated(json.load(stream)))
+            stored = _validated(json.load(stream))
+            cfg.update(stored)
+            if "diagnostic_targets" in stored:
+                cfg["diagnostic_targets"] = diagnostic_defaults(stored["diagnostic_targets"])
     except FileNotFoundError:
         return cfg
     except (OSError, ValueError, TypeError) as exc:

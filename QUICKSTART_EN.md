@@ -44,6 +44,17 @@ Use the add action for a second gateway. Check the selected gateway, the request
 
 **Stop the service** by running `.\Start.bat --stop` or `./net-proxy-tool --stop` from the extracted directory. Closing the browser tab leaves the service running. Your gateway will be available at the next start.
 
+## Recheck from a fresh SSH login
+
+Log in to the same host, port and account shown for the node. Compare the same URL with the worker pool.
+
+```sh
+curl https://www.google.com/
+curl -sS -L --max-time 30 -o /dev/null -w 'HTTP %{http_code}  redirects=%{num_redirects}  peer=%{remote_ip}:%{remote_port}\n' https://www.google.com/
+```
+
+The first command shows the initial response. The second follows redirects. An HTTP 403 indicates a refusal, while curl exit 35 identifies a TLS handshake failure.
+
 ## Run from source or a Python environment
 
 Run the following in the source directory with Python 3.8 or newer. Use `python3` on macOS or Linux. Running from source uses the Python standard library.
@@ -62,7 +73,7 @@ net-proxy-tool
 After saving a gateway, send one request through it. On Windows, use `curl.exe` for the curl executable.
 
 ```console
-with-proxy curl -I https://example.com/
+with-proxy curl -L https://www.google.com/
 ```
 
 The same Python environment can scope proxy settings to a block. Environment variables are process-wide, so other threads can observe the settings while the block runs.
@@ -72,7 +83,7 @@ from urllib.request import urlopen
 from sdk import ProxySession
 
 with ProxySession():
-    with urlopen("https://example.com/", timeout=10) as response:
+    with urlopen("https://www.google.com/", timeout=10) as response:
         print(response.status)
 ```
 

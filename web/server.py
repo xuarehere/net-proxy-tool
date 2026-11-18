@@ -17,11 +17,9 @@ import os
 from pathlib import Path
 import re
 import shlex
-import shutil
 import threading
 import socket
 import ssl
-import stat
 import subprocess
 import sys
 import tempfile
@@ -36,7 +34,9 @@ STATIC_DIR = WEB_DIR / "static"
 if __package__ in (None, ""):
     sys.path.insert(0, str(TOOL_DIR))
 
-from sdk.config import VERSION, data_dir, load_config, resolve_gateway_info, save_config
+from sdk.config import DEFAULT_TEST_URL, VERSION, data_dir, load_config, resolve_gateway_info, save_config
+from web import node_probe
+from web.ssh_askpass import password_environment
 
 CONFIG_WRITE_LOCK = threading.RLock()
 
@@ -414,21 +414,6 @@ def public_data(value):
     return value
 
 
-def get_control_node_public_key():
-    """Reads local SSH public key for auto-enrollment into remote targets."""
-    for fn in ("id_rsa.pub", "id_ed25519.pub", "id_ecdsa.pub"):
-        path = os.path.expanduser(f"~/.ssh/{fn}")
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    content = f.read().strip()
-                    if content:
-                        return content
-            except Exception:
-                pass
-    return None
-
-
 def ssh_with_script(command, script, timeout, env=None):
     # Remote sh expects LF regardless of the Windows controller's code page.
     result = subprocess.run(command, input=script.encode("utf-8"), capture_output=True, env=env, timeout=timeout)
@@ -436,73 +421,28 @@ def ssh_with_script(command, script, timeout, env=None):
                                        result.stderr.decode("utf-8", "replace"))
 
 
-def run_remote_ssh_script(host, port, user, auth_type, password, script, timeout=14):
-    """
-    Executes a script on a remote workstation, edge board, or container via SSH.
-    Supports:
-    - Key-based auth (BatchMode=yes)
-    - Password-based auth via SSH_ASKPASS (zero external dependencies, pure stdlib)
-    - Auto-injection of local SSH public key on first password-authenticated connection.
-    """
+def run_remote_ssh_script(host, port, user, auth_type, password, script, timeout=14, *, remote_command="sh"):
+    """Authenticate one explicit identity against an already trusted OpenSSH host key."""
     port = int(port or 22)
-    user = user or "root"
     auth_type = (auth_type or ("password" if password else "key")).lower()
-
     validate_host_port(host, port)
-    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", user):
-        raise ValueError("无效的 SSH 用户名")
-    if password and auth_type == "password":
-        if os.name == "nt":
-            raise ValueError("Windows 控制端请使用 OpenSSH 密钥认证；密码接入可在 Linux 控制端执行")
-        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".sh") as tf:
-            tf.write('#!/bin/sh\nprintf "%s\\n" "$NET_PROXY_SSH_PASSWORD"\n')
-            askpass_path = tf.name
-        os.chmod(askpass_path, stat.S_IRWXU)
-
-        env = os.environ.copy()
-        env["NET_PROXY_SSH_PASSWORD"] = password
-        env["SSH_ASKPASS"] = askpass_path
-        env["SSH_ASKPASS_REQUIRE"] = "force"
-        env["DISPLAY"] = "dummy"
-
-        try:
-            pubkey = get_control_node_public_key() if script.startswith("action=on\n") else None
-            if pubkey:
-                pubkey = shlex.quote(pubkey)
-                enroll_cmd = (
-                    f"mkdir -p ~/.ssh && chmod 700 ~/.ssh && "
-                    f"grep -qFx -- {pubkey} ~/.ssh/authorized_keys 2>/dev/null || "
-                    f"printf '%s\\n' {pubkey} >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-                )
-                full_script = f"{enroll_cmd}\n{script}"
-            else:
-                full_script = script
-
-            ssh_bin = ["setsid", "ssh"] if sys.platform != "win32" and shutil.which("setsid") else ["ssh"]
-            cmd = ssh_bin + [
-                "-p", str(port),
-                "-o", "StrictHostKeyChecking=accept-new",
-                "-o", "ConnectTimeout=5",
-                f"{user}@{host}",
-                "sh"
-            ]
-            return ssh_with_script(cmd, full_script, timeout, env)
-        finally:
-            try:
-                os.remove(askpass_path)
-            except Exception:
-                pass
-    else:
-        cmd = [
-            "ssh",
-            "-p", str(port),
-            "-o", "BatchMode=yes",
-            "-o", "StrictHostKeyChecking=accept-new",
-            "-o", "ConnectTimeout=5",
-            f"{user}@{host}",
-            "sh"
-        ]
-        return ssh_with_script(cmd, script, timeout)
+    validate_ssh_destination(host, user or "")
+    if auth_type not in ("password", "key"):
+        raise ValueError("无效的 SSH 认证类型")
+    cmd = ["ssh", "-p", str(port), "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=5",
+           "-o", "NumberOfPasswordPrompts=1"]
+    if auth_type == "password":
+        cmd += ["-o", "BatchMode=no", "-o", "PreferredAuthentications=password",
+                "-o", "PubkeyAuthentication=no", "-o", "KbdInteractiveAuthentication=no",
+                "-o", "PasswordAuthentication=yes", "-o", "ProxyCommand=none", "-o", "ProxyJump=none",
+                "-o", "Hostname=" + host, "-o", "CanonicalizeHostname=no", "-o", "ControlPath=none",
+                "-o", "ControlMaster=no", "-o", "PermitLocalCommand=no", "-o", "ClearAllForwardings=yes"]
+        cmd += [f"{user}@{host}", remote_command]
+        with password_environment(password) as env:
+            return ssh_with_script(cmd, script, timeout, env)
+    cmd += ["-o", "BatchMode=yes", "-o", "PasswordAuthentication=no",
+            "-o", "KbdInteractiveAuthentication=no", f"{user}@{host}", remote_command]
+    return ssh_with_script(cmd, script, timeout)
 
 
 def generate_provisioning_script(proxy_url, no_proxy, action="on"):
@@ -533,8 +473,45 @@ def docker_ssh_command(target, *command):
     if command[0] == "exec":
         remote.append("sh")
     # OpenSSH passes the remote command to a shell, even when invoked with argv.
-    return ["ssh", "-p", str(port), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+    return ["ssh", "-p", str(port), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
             "-o", "ConnectTimeout=5", f"{user}@{host}", " ".join(map(shlex.quote, remote))]
+
+
+def node_ssh_identity(target):
+    """The complete destination that a saved credential is allowed to authenticate."""
+    mode = (target.get("access_mode") or ("docker_host" if target.get("container_name") and not target.get("port") else "ssh")).lower()
+    host = (target.get("ssh_host") or target.get("host")) if mode == "docker_host" else target.get("host")
+    user = target.get("ssh_user") or ("root" if mode != "docker_host" and target.get("os_type") == "docker" else "ubuntu")
+    return (mode, host, int(target.get("port") or 22), user,
+            target.get("container_name", "") if mode == "docker_host" else "")
+
+
+def run_node_script(target, script, timeout=14):
+    """Run a fixed node operation using the same saved identity and SSH trust policy."""
+    mode, host, port, user, _ = node_ssh_identity(target)
+    auth_type = target.get("auth_type") or ("password" if target.get("ssh_pass") else "key")
+    remote = "sh"
+    if mode == "docker_host":
+        remote = docker_ssh_command(target, "exec", "-i", "-u", "0")[-1]
+    remote = "printf 'NPT_SSH_READY\\n'; " + remote
+    return run_remote_ssh_script(host, port, user, auth_type, target.get("ssh_pass"), script,
+                                 timeout, remote_command=remote)
+
+
+def preflight_target(request):
+    """Reuse a saved password only for that exact saved node destination."""
+    target = dict(request)
+    node_id = request.get("node_id") or request.get("id")
+    if node_id:
+        saved = next((node for node in load_config().get("clients", []) if node.get("id") == node_id), None)
+        if saved:
+            draft = dict(saved, **request)
+            if not request.get("ssh_pass") and node_ssh_identity(draft) != node_ssh_identity(saved):
+                raise ValueError("节点地址或身份已更改；请重新输入该目标的密码，不能复用原节点凭据")
+            target = draft
+            if saved.get("ssh_pass") and not request.get("ssh_pass"):
+                target["ssh_pass"] = saved["ssh_pass"]
+    return target
 
 
 class NodeBindingConflict(ValueError):
@@ -570,7 +547,7 @@ def apply_node_proxy(target, action, cfg):
     Dual-layer provisioning engine (Dedicated Tool Configs + Shell Environment Hooks).
     Unified support for:
     1. Local node (self machine, cross-platform detected via is_local_host)
-    2. Remote workstations / edge boards / containers via Direct SSH (passwordless or auto-enroll password)
+    2. Remote workstations / edge boards / containers via their configured SSH identity
     3. Host Docker Engine penetration (legacy containers without SSH daemon)
     """
     os_type = (target.get("os_type") or "linux").lower()
@@ -585,7 +562,7 @@ def apply_node_proxy(target, action, cfg):
     if access_mode == "docker_host":
         script = generate_provisioning_script(proxy_url, no_proxy, action)
         try:
-            res = ssh_with_script(docker_ssh_command(target, "exec", "-i", "-u", "0"), script, 12)
+            res = run_node_script(target, script, timeout=12)
             result["returncode"] = res.returncode
             if res.returncode != 0:
                 result["stderr"] = res.stderr.strip()
@@ -608,103 +585,143 @@ def apply_node_proxy(target, action, cfg):
         return result
 
     # 3. 通用远程 SSH 直连通道 (物理工作站 / 工控机 / 边缘设备 / 暴露端口的 Docker 容器)
-    host = target.get("host")
-    port = int(target.get("port") or 22)
-    user = target.get("ssh_user") or ("root" if os_type == "docker" else "ubuntu")
-    auth_type = target.get("auth_type") or ("password" if target.get("ssh_pass") else "key")
-    password = target.get("ssh_pass")
-
     script = generate_provisioning_script(proxy_url, no_proxy, action)
     try:
-        res = run_remote_ssh_script(host, port, user, auth_type, password, script, timeout=14)
+        res = run_node_script(target, script, timeout=14)
         result["returncode"] = res.returncode
         if res.returncode != 0:
             result["stderr"] = res.stderr.strip()
-        else:
-            # If initial connection with password succeeded, upgrade node to key auth
-            if action == "on" and password and auth_type == "password" and get_control_node_public_key():
-                probe = run_remote_ssh_script(host, port, user, "key", None, "true", timeout=8)
-                if probe.returncode != 0:
-                    return result
-                target.pop("ssh_pass", None)
-                target["auth_type"] = "key"
-                target["has_ssh_key"] = True
     except Exception as e:
         result["error"] = str(e)
 
     return result
 
 
-def check_node_http(target, gateway=None, target_url="https://example.com/"):
-    """Run a GET on the selected node, recording transport and HTTP separately."""
-    parsed = urllib.parse.urlsplit(target_url)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
-        raise ValueError("目标必须是无凭据的 HTTP 或 HTTPS URL")
+def check_node_http(target, gateway=None, target_url=None):
+    """Run one curl process so native redirect rules preserve account credentials safely."""
+    url = node_probe.validate_url(target_url or DEFAULT_TEST_URL)
     mode = target.get("access_mode") or ("docker_host" if target.get("container_name") and not target.get("port") else "ssh")
     local = (mode != "docker_host" and is_local_host(target.get("host"))
              and int(target.get("port") or 22) == 22 and not target.get("container_name"))
     transport = "local" if local else ("ssh_docker_exec" if mode == "docker_host" else "ssh")
     started = time.monotonic()
-    stages = {"ssh": "skipped" if local else "pending",
-              "docker_exec": "pending" if mode == "docker_host" else "skipped",
-              "curl": "pending", "tcp": "pending", "http": "pending"}
-    result = {"online": False, "success": False, "latency_ms": None, "transport": transport,
-              "request_mode": "explicit_proxy" if gateway else "ordinary_request", "target_url": target_url,
-              "gateway_id": gateway.get("id") if gateway else None, "stages": stages,
+    stages = {"ssh": "skipped" if local else "not_reached",
+              "docker_exec": "not_reached" if mode == "docker_host" else "skipped",
+              "curl": "not_reached", "tcp": "not_reached", "tls": "not_reached", "http": "not_reached"}
+    result = {"online": False, "success": False, "http_ok": False, "business_ok": None,
+              "business_auth": {"status": "not_checked"}, "latency_ms": None, "transport": transport,
+              "request_mode": "explicit_proxy" if gateway else "ordinary_request", "target_url": url,
+              "request_url": url, "final_url": node_probe.safe_url(url), "gateway_id": gateway.get("id") if gateway else None,
+              "stages": stages, "auth_ok": None, "first_status": None, "final_status": None,
+              "code": None, "redirects": [], "hops": [], "error_type": None,
+              "execution_identity": {}, "peer": {"ip": None, "port": None}, "connect_status": None,
+              "proxy_evidence": {"status": "unknown", "source": "curl_peer"},
+              "exit_evidence": {"status": "not_checked"},
+              "tls_policy": "curl_defaults" if gateway else "account_configuration",
               "is_proxy_enabled": bool(target.get("is_proxy_enabled"))}
+    proxy = gateway_url(gateway) if gateway else None
+    if proxy:
+        result["proxy_url"] = proxy
     try:
         executable = "curl.exe" if local and os.name == "nt" else "curl"
-        command = [executable]
-        if gateway:
-            proxy = gateway_url(gateway)
-            result["proxy_url"] = proxy
-            command += ["-q", "--proxy", proxy, "--noproxy", ""]
-        command += ["--request", "GET", "--no-location", "--globoff",
-                    "--silent", "--show-error", "--output", os.devnull if local else "/dev/null",
-                    "--write-out", "\nNPT_HTTP_RESULT:%{http_code}|%{remote_ip}|%{time_connect}\n",
-                    "--connect-timeout", "3", "--max-time", "8", "--proto", "=http,https", "--url", target_url]
         if local:
-            res = subprocess.run(command, capture_output=True, text=True, errors="replace", timeout=10)
-            execution_ready = True
+            with tempfile.TemporaryDirectory(prefix="npt-curl-headers-") as temporary:
+                headers = Path(temporary) / "headers"
+                command = node_probe.curl_command(executable, url, proxy, output=os.devnull, headers=str(headers))
+                res = subprocess.run(command, capture_output=True, text=True, errors="replace", timeout=22)
+                if headers.is_file():
+                    res.stdout += "\n" + node_probe.filter_headers(headers.read_text(encoding="iso-8859-1"))
+            identity = node_probe.local_identity()
         else:
-            curl_script = "printf 'NPT_EXEC_READY\\n'\n" + " ".join(map(shlex.quote, command))
-            if mode == "docker_host":
-                ssh_command = docker_ssh_command(target, "exec", "-i", "-u", "0")
-                ssh_command[-1] = "printf 'NPT_SSH_READY\\n'; " + ssh_command[-1]
-                res = ssh_with_script(ssh_command, curl_script, 14)
-            else:
-                user = target.get("ssh_user") or ("root" if target.get("os_type") == "docker" else "ubuntu")
-                script = "printf 'NPT_SSH_READY\\n'\n" + curl_script
-                res = run_remote_ssh_script(target["host"], target.get("port"), user,
-                                            target.get("auth_type"), target.get("ssh_pass"), script, timeout=14)
+            command = node_probe.curl_command(executable, url, proxy)
+            res = run_node_script(target, node_probe.remote_script(command), timeout=30)
             stages["ssh"] = "passed" if "NPT_SSH_READY" in res.stdout else "failed"
-            execution_ready = "NPT_EXEC_READY" in res.stdout
+            result["auth_ok"] = stages["ssh"] == "passed"
             if mode == "docker_host":
-                stages["docker_exec"] = "passed" if execution_ready else "failed"
-        result["exit_code"] = res.returncode
-        metrics = re.search(r"^NPT_HTTP_RESULT:(\d{3})\|([^|\r\n]*)\|([0-9.]+)$", res.stdout, re.MULTILINE)
-        stages["curl"] = "passed" if metrics else "failed"
-        if metrics:
-            code, remote_ip, connected_at = metrics.groups()
-            result["code"] = int(code) if code != "000" else None
-            result["remote_ip"] = remote_ip
-            stages["tcp"] = "passed" if remote_ip or float(connected_at) > 0 else "failed"
-            result["online"] = res.returncode == 0 and code.startswith("2")
-            stages["http"] = "passed" if result["online"] else "failed"
-            result["status_line"] = "HTTP " + code if code != "000" else "未收到 HTTP 响应"
+                stages["docker_exec"] = "passed" if "NPT_EXEC_READY" in res.stdout else "failed"
+            identity = None
+        observed = node_probe.parse_output(res.stdout)
+        result.update(exit_code=res.returncode, final_url=observed["final_url"] or node_probe.safe_url(url),
+                      code=observed["code"], final_status=observed["code"], peer=observed["peer"],
+                      connect_status=observed["connect_status"], ssl_verify_result=observed["ssl_verify_result"])
+        result["execution_identity"] = identity if local else observed["execution_identity"]
+        result["execution_identity"]["curl_config_loaded"] = bool(
+            not gateway and result["execution_identity"].get("curl_config"))
+        responses = observed["responses"]
+        result["first_status"] = responses[0]["code"] if responses else observed["code"]
+        current = node_probe.safe_url(url)
+        for index, response in enumerate(responses):
+            final = index == len(responses) - 1 and response["code"] == observed["code"]
+            result["hops"].append({"url": current, "code": response["code"],
+                                   "peer": observed["peer"] if final else {"ip": None, "port": None}})
+            if response.get("location") and response["code"] in (301, 302, 303, 307, 308):
+                redirected = node_probe.safe_url(urllib.parse.urljoin(current, response["location"]))
+                result["redirects"].append({"url": current, "code": response["code"], "location": redirected})
+                current = redirected
+        stages["curl"] = "passed" if observed["metrics_received"] else "failed"
+        stages["tcp"] = "passed" if observed["peer"]["ip"] else "failed" if observed["metrics_received"] else "not_reached"
+        error_type = node_probe.curl_error(res.returncode, observed["connect_status"])
+        is_https = urllib.parse.urlsplit(result["final_url"]).scheme == "https"
+        stages["tls"] = ("failed" if error_type in ("tls_handshake", "tls_certificate") else
+                         "skipped" if not is_https else "passed" if observed["code"] else "not_reached")
+        stages["http"] = "passed" if observed["code"] else "not_reached"
+        if not local and not result["auth_ok"]:
+            error_type, message = node_probe.ssh_error(res.stderr)
+            result.update(error_type=error_type, error=message)
+        elif mode == "docker_host" and stages["docker_exec"] != "passed":
+            result.update(error_type="docker_exec", error="容器执行通道未就绪")
+        elif res.returncode:
+            if res.returncode == 1 and result["redirects"]:
+                error_type = "redirect_policy"
+            elif res.returncode == 67 and result["redirects"]:
+                error_type = "redirect_credentials"
+            # curl can include URLs or credentials from account configuration in stderr.
+            result.update(error_type=error_type, error="curl 未完成请求 (exit {})".format(res.returncode))
+        elif not observed["metrics_received"]:
+            result.update(error_type="curl_output", error="curl 未返回可解析的请求结果")
         else:
-            result["status_line"] = "目标上 curl 未完成" if execution_ready else "节点执行通道未就绪"
-        result["success"] = result["online"]
-        if not result["online"]:
-            result["error"] = res.stderr.strip()[:500] or result["status_line"]
+            result["online"] = bool(observed["code"] and 200 <= observed["code"] < 300)
+            if not result["online"]:
+                result.update(error_type="proxy_auth" if observed["code"] == 407 else "http_status",
+                              error="HTTP " + str(observed["code"] or "无响应"))
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
-        result.update(error=str(exc), status_line=str(exc))
-        stages["curl" if local else "ssh"] = "failed"
-    for stage, status in stages.items():
-        if status == "pending":
-            stages[stage] = "not_reached"
+        result.update(error_type="timeout" if isinstance(exc, (TimeoutError, subprocess.TimeoutExpired)) else "execution",
+                      error="节点执行超时" if isinstance(exc, (TimeoutError, subprocess.TimeoutExpired)) else "无法执行节点探测")
+        if not local and stages["ssh"] != "passed":
+            stages["ssh"] = "failed"
+            result["auth_ok"] = False
+    result["success"] = result["http_ok"] = result["online"]
+    if result["code"] in (401, 403):
+        result["business_ok"] = False
+        result["business_auth"] = {"status": "denied"}
+    result["proxy_evidence"]["peer"] = result["peer"]
+    if gateway:
+        result["proxy_evidence"]["expected_proxy"] = {"host": gateway["host"], "port": int(gateway["port"])}
+        if result["peer"]["ip"] and result["peer"]["port"] == int(gateway["port"]):
+            result["proxy_evidence"]["status"] = "selected_proxy"
+    result["status_line"] = ("HTTP " + str(result["code"])) if result["code"] else result.get("error", "未收到 HTTP 响应")
     result["latency_ms"] = round((time.monotonic() - started) * 1000, 1)
     return result
+
+def check_node_requests(target, gateway, target_url):
+    gateway = gateway or {}
+    ordinary = check_node_http(target, target_url=target_url)
+    explicit = check_node_http(target, gateway, target_url) if gateway else {
+        "online": False, "success": False, "http_ok": False, "business_ok": None,
+        "error": "请先保存节点绑定的网关。", "stages": {}, "request_mode": "explicit_proxy",
+        "status_line": "尚未绑定网关", "proxy_evidence": {"status": "unknown"}}
+    observed = ordinary.get("peer") or {}
+    expected = explicit.get("peer") or {}
+    if observed.get("ip") and expected.get("ip") and observed.get("port") and expected.get("port"):
+        ordinary.setdefault("proxy_evidence", {}).update(
+            status="matches_explicit_peer" if observed == expected else "different_peer",
+            source="curl_peer", peer=observed,
+            expected_proxy={"host": gateway["host"], "port": int(gateway["port"])})
+    return dict(ordinary, success=explicit["online"] and ordinary["online"], node_id=target.get("id"),
+                gateway_id=gateway.get("id"), binding_revision=target.get("binding_revision", 0),
+                explicit_proxy=explicit, ordinary_request=ordinary,
+                message="指定网关请求：{}；节点普通请求：{}".format(explicit["status_line"], ordinary["status_line"]))
+
 
 
 class ProxyConsoleHandler(SimpleHTTPRequestHandler):
@@ -824,8 +841,8 @@ echo "[net-proxy-tool] 已清除当前会话的 HTTP 代理变量"
 
 cat << 'EOF' > /etc/profile.d/net-proxy-switch.sh
 alias proxy-on='export HTTP_PROXY="{proxy_url}" HTTPS_PROXY="{proxy_url}" http_proxy="{proxy_url}" https_proxy="{proxy_url}" NO_PROXY="{no_proxy}" no_proxy="{no_proxy}" && echo "✅ [容器代理] 已开启出海通道 ({gw['host']}:{gw['port']})"'
-alias proxy-off='unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy && echo "🛑 [容器代理] 已关闭出海通道，恢复直连"'
-alias proxy-status='env | grep -i proxy || echo "⚪ [容器代理] 当前处于直连状态 (未开启代理)"'
+alias proxy-off='unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy && echo "[容器代理] 已清除当前会话的 HTTP 代理变量；工具配置与实际请求路径需另行验证"'
+alias proxy-status='env | grep -i proxy || echo "[容器代理] 当前会话未检测到代理变量；这不能证明工具未使用代理"'
 EOF
 
 cat << 'EOF' > /usr/local/bin/with-proxy
@@ -852,7 +869,7 @@ echo "=================================================="
 echo "🎉 [容器环境] 容器内独立代理开关已就绪！"
 echo "在容器内部直接输入以下命令即可随时控制:"
 echo "  proxy-on           # 开启出海代理"
-echo "  proxy-off          # 关闭出海代理 (恢复直连)"
+echo "  proxy-off          # 清除当前会话的 HTTP 代理变量"
 echo "  proxy-status       # 查看代理开关状态"
 echo "  with-proxy <命令>  # 单任务临时走代理 (如 with-proxy pip install ...)"
 echo "=================================================="
@@ -867,7 +884,7 @@ echo "=================================================="
             return
 
         if path == "/api/config":
-            self.send_json(load_config())
+            self.send_json(dict(load_config(), default_test_url=DEFAULT_TEST_URL))
             return
 
         if path == "/api/audit-logs":
@@ -1004,7 +1021,7 @@ echo "=================================================="
         port = int(req_json.get("port", 0))
         proxy = gateway_url({"host": host, "port": port, "protocol": req_json.get("protocol", "http")})
         ok, tcp_info = check_tcp_port(host, port, timeout=2.5)
-        url = req_json.get("target_url") or "https://example.com/"
+        url = req_json.get("target_url") or DEFAULT_TEST_URL
         diagnostic_url(url)
         if not ok:
             self.send_json({"success": False, "tcp_ok": False, "online": False, "http_ok": False,
@@ -1034,12 +1051,14 @@ echo "=================================================="
         2. SSH protocol banner handshake
         3. Real credential authentication test (Password via ASKPASS or Key via BatchMode)
         """
-        req_json = self.read_json_body()
+        req_json = preflight_target(self.read_json_body())
         host = req_json.get("host", "").strip()
         port = int(req_json.get("port") or 22)
         access_mode = req_json.get("access_mode", "ssh").strip().lower()
-        auth_type = req_json.get("auth_type", "key").strip().lower()
-        user = req_json.get("ssh_user", "").strip() or "root"
+        auth_type = (req_json.get("auth_type") or ("password" if req_json.get("ssh_pass") else "key")).strip().lower()
+        if auth_type not in ("key", "password"):
+            raise ValueError("无效的 SSH 认证类型")
+        user = node_ssh_identity(req_json)[3]
         password = req_json.get("ssh_pass", "")
         container_name = req_json.get("container_name", "").strip()
         ssh_host = req_json.get("ssh_host", "").strip() or host
@@ -1057,7 +1076,7 @@ echo "=================================================="
                 return
             try:
                 cmd = docker_ssh_command(dict(req_json, ssh_host=ssh_host, ssh_user=user), "inspect", "-f", "{{.State.Running}}")
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=6)
+                res = run_remote_ssh_script(ssh_host, port, user, auth_type, password, "", timeout=6, remote_command=cmd[-1])
                 if res.returncode == 0 and "true" in res.stdout.lower():
                     self.send_json({
                         "success": True,
@@ -1069,7 +1088,7 @@ echo "=================================================="
                 else:
                     detail = res.stderr.strip().splitlines()[-1:] if res.stderr else []
                     if res.returncode == 255:
-                        reason = "SSH 连接或密钥认证失败"
+                        reason = "SSH 连接、主机密钥核验或所选身份认证失败"
                     elif res.returncode:
                         reason = "无法检查容器，请核对名称及远程账号的 Docker 权限"
                     else:
@@ -1120,7 +1139,7 @@ echo "=================================================="
         auth_ok = False
         auth_msg = ""
         try:
-            if auth_type == "password" and password:
+            if auth_type == "password":
                 res = run_remote_ssh_script(host, port, user, "password", password, "true", timeout=6)
                 if res.returncode == 0:
                     auth_ok = True
@@ -1229,6 +1248,11 @@ echo "=================================================="
         if not target:
             self.send_json({"success": False, "error": f"未找到ID为 '{cid}' 的业务节点"}, status_code=404)
             return
+
+        if target.get("ssh_pass") and not req_json.get("ssh_pass"):
+            draft = dict(target, **req_json)
+            if node_ssh_identity(draft) != node_ssh_identity(target):
+                raise ValueError("节点地址或身份已更改；请重新输入该目标的密码，不能复用原节点凭据")
 
         previous_binding = target.get("bound_gateway_id") or ""
         if "binding_revision" in req_json and req_json["binding_revision"] != target.get("binding_revision", 0):
@@ -1390,29 +1414,32 @@ echo "=================================================="
         })
 
     def handle_nodes_health_check_all(self):
-        """
-        Performs concurrent health checks across all worker nodes and containers.
-        """
-        self.read_json_body()
+        """Inspect ordinary and explicitly proxied requests without changing node state."""
+        request = self.read_json_body()
+        url = node_probe.validate_url(request.get("target_url") or DEFAULT_TEST_URL)
         cfg = load_config()
         clients = cfg.get("clients", [])
-        health_map = {}
-
         def check_one(target):
-            return target.get("id"), check_node_http(target)
-
+            gateway = resolve_gateway_info(cfg, target.get("bound_gateway_id"))
+            return target.get("id"), check_node_requests(target, gateway, url)
         with ThreadPoolExecutor(max_workers=5) as executor:
-            future_results = list(executor.map(check_one, clients))
-
-        for cid, info in future_results:
-            health_map[cid] = info
-
-        write_audit_log("health_check_all", "-", "success", f"全网巡检完成，共检测 {len(clients)} 个节点")
-        self.send_json({
-            "success": True,
-            "health_map": health_map,
-            "checked_at": time.strftime("%Y-%m-%d %H:%M:%S")
-        })
+            health_map = dict(executor.map(check_one, clients))
+        current = load_config()
+        for target in clients:
+            present = next((item for item in current.get("clients", []) if item.get("id") == target.get("id")), None)
+            if (present is None or present.get("bound_gateway_id") != target.get("bound_gateway_id")
+                    or present.get("binding_revision", 0) != target.get("binding_revision", 0)
+                    or resolve_gateway_info(current, target.get("bound_gateway_id")) != resolve_gateway_info(cfg, target.get("bound_gateway_id"))):
+                health_map[target["id"]].update(binding_changed=True, online=False, success=False,
+                                                error="巡检期间节点绑定已变化，请重新测试。")
+        passed = sum(bool(item.get("success")) for item in health_map.values())
+        outcome = "success" if passed == len(clients) else "partial" if passed else "failed"
+        write_audit_log("health_check_all", "-", outcome, f"巡检完成，{passed}/{len(clients)} 个节点两路 HTTP 请求成功")
+        self.send_json({"success": True, "completed": True, "all_http_ok": passed == len(clients),
+                        "health_map": health_map, "target_url": url, "total": len(clients),
+                        "http_success_count": sum(bool(item.get("online")) for item in health_map.values()),
+                        "both_paths_success_count": passed,
+                        "checked_at": time.strftime("%Y-%m-%d %H:%M:%S")})
 
 
     def handle_node_test(self):
@@ -1430,21 +1457,15 @@ echo "=================================================="
             return
 
         gateway = selected_node_gateway(target, cfg, req_json)
-        url = req_json.get("target_url") or "https://example.com/"
-        ordinary = check_node_http(target, target_url=url)
-        explicit = check_node_http(target, gateway, url) if gateway else {
-            "online": False, "success": False, "error": "请先保存节点绑定的网关。", "stages": {},
-            "request_mode": "explicit_proxy", "status_line": "尚未绑定网关"}
+        url = node_probe.validate_url(req_json.get("target_url") or DEFAULT_TEST_URL)
+        result = check_node_requests(target, gateway, url)
         current = load_config()
         present = next((item for item in current.get("clients", []) if item.get("id") == node_id), None)
         if (present is None or present.get("bound_gateway_id") != target.get("bound_gateway_id")
                 or present.get("binding_revision", 0) != target.get("binding_revision", 0)
                 or resolve_gateway_info(current, target.get("bound_gateway_id")) != gateway):
             raise NodeBindingConflict("测试期间节点绑定已变化，请重新测试。")
-        message = "指定网关请求：{}；节点普通请求：{}".format(explicit["status_line"], ordinary["status_line"])
-        self.send_json(dict(ordinary, success=explicit["online"] and ordinary["online"], node_id=node_id,
-                            gateway_id=gateway.get("id"), binding_revision=target.get("binding_revision", 0),
-                            explicit_proxy=explicit, ordinary_request=ordinary, message=message))
+        self.send_json(result)
 
     def handle_gateway_add(self):
         req_json = self.read_json_body()

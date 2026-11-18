@@ -92,6 +92,12 @@ def run(screenshot=None):
         def form(id):
             return page.locator("#" + id)
 
+        for control in page.locator("[data-target-input]").all():
+            labels = control.locator("option").all_text_contents()
+            for label in ("Google", "Claude", "ChatGPT", "YouTube", "Gemini", "Example", "GitHub", "GitHub Zen API", "自定义 URL"):
+                assert label in labels, labels
+            expect(page.locator("#" + control.get_attribute("data-target-input"))).to_have_value("https://www.google.com/")
+
         def defer_readback():
             page.route("**/api/config?*", hold_config)
 
@@ -138,7 +144,8 @@ def run(screenshot=None):
 
         cfg = load_config()
         assert len(cfg["gateways"]) == 2
-        cfg["diagnostic_targets"] = {"Example": {"url": START}}
+        cfg["diagnostic_targets"] = {"Redirect": {"url": START}, "Plain": FINAL,
+                                     "Denied": "http://browser-fixture.invalid/forbidden"}
         cfg["clients"] = [dict(id=name, name=name, host=host, os_type="linux", access_mode="ssh",
                                bound_gateway_id=gateways[0].gateway_id)
                           for name, host in [("node-one", "192.0.2.1"), ("node-two", "192.0.2.2")]]
@@ -154,12 +161,26 @@ def run(screenshot=None):
         expect(form("status-tag-step-2")).to_contain_text("node-two")
         form("wizard-start-diag-btn").click()
         expect(form("handover-gw-name")).to_contain_text(str(gateways[1].server_port))
+        expect(form("wizard-target-grid").locator(".t-pill.success")).to_have_count(2)
+        expect(form("wizard-target-grid").locator(".t-pill.failed")).to_have_text("HTTP 403")
+        expect(page.locator('[data-target-input="setup-url"] option', has_text="Redirect")).to_have_count(1)
         probes = []
 
         def probe(node, gateway=None, target_url=None):
             probes.append((node["id"], gateway and gateway["id"], target_url))
-            return {"online": bool(gateway), "status_line": "HTTP 200" if gateway else "HTTP 403",
-                    "stages": {"http": "passed" if gateway else "failed"}}
+            code = 200 if gateway else 403
+            return {
+                "online": bool(gateway), "http_ok": bool(gateway), "business_ok": None if gateway else False,
+                "status_line": "HTTP " + str(code), "target_url": target_url, "final_url": FINAL,
+                "code": code, "first_status": 302, "final_status": code, "is_proxy_enabled": False,
+                "redirects": [{"url": target_url, "code": 302, "location": FINAL}], "exit_code": 0,
+                "peer": {"ip": "192.0.2.10" if gateway else "192.0.2.11", "port": 3128 if gateway else 443},
+                "proxy_evidence": {"status": "selected_proxy" if gateway else "unknown"},
+                "execution_identity": {"uid": "1000", "user": "qa", "home": "/home/qa",
+                                       "curl_config": "/home/qa/.curlrc"},
+                "auth_ok": True, "connect_status": 200 if gateway else None,
+                "stages": {"ssh": "passed", "http": "passed" if gateway else "failed"},
+            }
 
         with patch.object(server, "check_node_http", side_effect=probe):
             form("wizard-btn-node-test").click()
@@ -178,8 +199,78 @@ def run(screenshot=None):
             form("wizard-btn-proxy-off").click()
             expect(form("wizard-btn-proxy-off")).to_be_enabled()
         assert commands == [("node-two", gateways[1].gateway_id, action) for action in ("on", "off")]
+        expect(form("wizard-feedback-content")).to_contain_text("启用前已有的代理可能继续生效")
+
+        def baseline_proxy(node, gateway=None, target_url=None):
+            result = probe(node, gateway, target_url)
+            result.update(online=True, code=200, http_ok=True, first_status=200, final_status=200,
+                          business_ok=None, redirects=[], status_line="HTTP 200",
+                          peer={"ip": "192.0.2.10", "port": 3128}, is_proxy_enabled=False)
+            return result
+
+        with patch.object(server, "check_node_http", side_effect=baseline_proxy):
+            form("wizard-btn-node-test").click()
+            output = form("wizard-feedback-content")
+            expect(output).to_contain_text("托管配置记录 · 已关闭")
+            expect(output).to_contain_text("普通 curl（目标当前设置） · 成功")
+            expect(output).to_contain_text("与显式请求的代理对端一致")
         form("wizard-client-select").select_option("node-one")
         assert form("card-step-4").evaluate("el => el.inert")
+
+        page.locator('[data-tab="tab-topology"]').click()
+        prompts = []
+        def cancel_batch(dialog):
+            prompts.append(dialog.message)
+            dialog.dismiss()
+        page.once("dialog", cancel_batch)
+        form("top-disable-all-btn").click()
+        assert "启用前的配置" in prompts[0] and "原有代理可能继续生效" in prompts[0]
+        node = page.locator('tr', has=page.locator('[data-action="test-node-out"][data-id="node-two"]'))
+        check = node.locator('[data-action="test-node-out"]')
+        settings = node.locator("[data-node-target]")
+        settings.select_option("https://claude.ai/")
+        with patch.object(server, "check_node_http", side_effect=probe):
+            check.click()
+            expect(form("node-test-heading")).to_contain_text("node-two")
+            expect(form("node-test-record")).to_contain_text("https://claude.ai/")
+            expect(form("node-test-record")).to_contain_text("记录 · 已关闭")
+            expect(form("node-test-record")).to_contain_text("公网出口 IP · 未核验")
+            expect(form("node-test-checks")).to_contain_text("首跳 HTTP 302 → 最终 HTTP 200")
+            expect(form("node-test-checks")).to_contain_text("首跳 HTTP 302 → 最终 HTTP 403")
+            expect(form("node-test-checks")).to_contain_text("192.0.2.10:3128")
+            expect(form("node-test-checks")).to_contain_text("192.0.2.11:443")
+            expect(form("node-test-checks")).to_contain_text("与显式请求的代理对端不同")
+            expect(form("node-test-checks")).to_contain_text("未验证登录状态及账户权限")
+            expect(form("node-test-checks")).to_contain_text("/home/qa/.curlrc")
+            assert probes[-2:] == [("node-two", gw, "https://claude.ai/") for gw in (None, gateways[1].gateway_id)]
+            settings.select_option("")
+            expect(form("node-test-results")).to_be_hidden()
+            node.locator("[data-node-custom]").fill(START)
+            check.click()
+            expect(form("node-test-record")).to_contain_text(START)
+            assert probes[-1][2] == START
+            form("node-target-url").fill(FINAL)
+            received = []
+            page.once("dialog", lambda dialog: (received.append(dialog.message), dialog.accept()))
+            form("top-health-check-btn").click()
+            expect(form("top-health-check-btn")).to_be_enabled()
+            assert received and FINAL in received[0]
+            assert all(entry[2] == FINAL for entry in probes[-4:])
+
+        cfg = load_config()
+        cfg["diagnostic_targets"] = {}
+        save_config(cfg)
+        page.reload()
+        expect(form("setup-save")).to_be_enabled()
+        expect(form("setup-url")).to_have_value("https://www.google.com/")
+        form("advanced-wizard").locator(":scope > summary").click()
+        form("wizard-test-url").fill(START)
+        form("wizard-test-gw-btn").click()
+        form("wizard-confirm-client-btn").click()
+        expect(form("wizard-target-grid")).to_contain_text("没有配置多站目标")
+        form("wizard-start-diag-btn").click()
+        expect(form("status-tag-step-3")).to_have_text("未配置多站目标")
+        assert not form("card-step-4").evaluate("el => el.inert")
 
         page.locator('[data-tab="tab-sandbox"]').click()
         for gw in gateways:

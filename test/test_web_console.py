@@ -95,7 +95,7 @@ class TestWebConsole(unittest.TestCase):
                         {"ssh_user": "-oProxyCommand=bad"}):
             self.assertEqual(self.request("/api/clients/update", dict(invalid, id="c"))[0], 400)
         with patch.object(server, "check_tcp_port", return_value=(True, 1)) as tcp, \
-                patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "true", "")) as run:
+                patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, b"true", b"")) as run:
             self.assertTrue(self.request("/api/test-node-preflight", node)[1]["success"])
             tcp.assert_called_once_with("127.0.0.1", 2222, timeout=2.5)
             self.assertEqual(run.call_args.args[0][1:3], ["-p", "2222"])
@@ -157,11 +157,15 @@ class TestWebConsole(unittest.TestCase):
         self.assertEqual((home / ".profile").read_text(encoding="utf-8"), "export CUSTOM=1\n")
         self.assertFalse((home / ".wgetrc").exists())
         (home / ".net-proxy-switch.sh").write_text("export HTTP_PROXY=legacy\n", encoding="utf-8")
-        for action in ("off", "on"):
+        result = switch("off")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Legacy v1.3", result.stderr)
+        self.assertEqual((home / ".curlrc").read_bytes(), original)
+        for action in ("on", "off"):
             result = switch(action)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("Legacy v1.3", result.stderr)
-            self.assertEqual((home / ".curlrc").read_bytes(), original)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((home / ".net-proxy-switch.sh").read_text(encoding="utf-8"), "export HTTP_PROXY=legacy\n")
+        self.assertEqual((home / ".curlrc").read_bytes(), original)
         (home / ".net-proxy-switch.sh").unlink()
         self.assertEqual(switch("on").returncode, 0)
         managed = (home / ".curlrc").read_bytes()

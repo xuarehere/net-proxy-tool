@@ -6,6 +6,7 @@ import os
 import re
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -13,7 +14,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from smoke import api
-from test_node_requests import FIXTURE
+from test_node_requests import FIXTURE, main as run_ssh_requests
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = "python:3.12-alpine"
@@ -65,6 +66,9 @@ def run():
             subprocess.run(["docker", "build", "-t", node_image, "-f", "-", context],
                            input=(ROOT / "packaging/ssh-target.Dockerfile").read_bytes(), check=True, timeout=300)
         cleanup.callback(invoke, "docker", "image", "rm", node_image, check=False)
+        subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "test", "-p", "test_ssh_auth.py"],
+                       cwd=ROOT, env=dict(os.environ, NET_PROXY_TEST_SSH_PASSWORD_IMAGE=node_image),
+                       check=True, timeout=180)
         invoke("docker", "network", "create", "--internal", network)
         cleanup.callback(invoke, "docker", "network", "rm", network, check=False)
         fixture_script = directory / "fixture.py"
@@ -88,6 +92,9 @@ def run():
         authorized.write_text("restrict " + pubkey + "\n", encoding="utf-8")
         host_key = directory / "host_key"
         invoke("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(host_key))
+        host_public = " ".join(host_key.with_suffix(".pub").read_text(encoding="utf-8").split()[:2])
+        subprocess.run(["docker", "exec", "-i", controller, "sh", "-ec", "umask 077; cat > ~/.ssh/known_hosts"],
+                       input=f"[127.0.0.1]:{ssh_port} {host_public}\n".encode(), check=True, timeout=10)
         pidfile = directory / "sshd.pid"
         conf = directory / "sshd_config"
         conf.write_text(f"""ListenAddress 127.0.0.1
@@ -112,8 +119,20 @@ DisableForwarding yes
             if pidfile.exists():
                 break
             time.sleep(0.1)
+        else:
+            raise RuntimeError("Disposable SSH daemon did not create its PID file")
         ssh_pid = pidfile.read_text(encoding="ascii").strip()
         cleanup.callback(invoke, "sudo", "-n", "kill", ssh_pid, check=False)
+        for _ in range(30):
+            try:
+                with socket.create_connection(("127.0.0.1", ssh_port), timeout=0.5) as connection:
+                    if connection.recv(256).startswith(b"SSH-"):
+                        break
+            except OSError:
+                pass
+            time.sleep(0.1)
+        else:
+            raise RuntimeError("Disposable SSH daemon did not accept SSH connections")
         node = {"id": "host-test", "name": "docker via ssh", "host": "127.0.0.1", "ssh_host": "127.0.0.1",
                 "ssh_user": runner, "port": ssh_port, "os_type": "docker", "access_mode": "docker_host",
                 "container_name": target}
@@ -124,7 +143,7 @@ DisableForwarding yes
             except OSError:
                 time.sleep(0.3)
         probe = ["docker", "exec", controller, "ssh", "-p", str(ssh_port),
-                 "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+                 "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
                  f"{runner}@127.0.0.1", f"id && command -v docker && docker inspect -f '{{{{.State.Running}}}}' {target}"]
         diagnostic = subprocess.run(probe, capture_output=True, text=True, timeout=15)
         if diagnostic.returncode != 0:
@@ -154,6 +173,11 @@ DisableForwarding yes
                 assert request["online"], result
                 assert request["transport"] == "ssh_docker_exec", request
                 assert request["stages"]["ssh"] == request["stages"]["docker_exec"] == "passed", request
+                assert request["execution_identity"]["uid"] == "0", request
+                assert request["execution_identity"]["home"], request
+            assert result["explicit_proxy"]["peer"]["port"] == 7890, result
+            assert result["ordinary_request"]["proxy_evidence"]["status"] == (
+                "matches_explicit_peer" if action == "on" else "different_peer"), result
             # A neighboring container performs its own ordinary request with no proxy changes.
             invoke("docker", "exec", sibling, "curl", "-fsS", "--max-time", "5", "http://fixture:8080/health")
             code = "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080/hits').read().decode())"
@@ -163,6 +187,8 @@ DisableForwarding yes
             assert container_snapshot(sibling) == original_sibling
             assert host_snapshot() == original_host
             print("SSH -> Docker", action or "before activation", "recorded proxy requests", expected_proxy_hits)
+        # The same already-built images exercise account-local CURL_HOME/XDG precedence and restoration.
+        run_ssh_requests(node_image, prefix)
     print("Real SSH -> Docker requests, target restoration, and neighboring-container/host isolation passed.")
 
 

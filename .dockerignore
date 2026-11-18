@@ -10,6 +10,8 @@ sdk/**
 web/**
 !web/__init__.py
 !web/server.py
+!web/ssh_askpass.py
+!web/node_probe.py
 !web/provision.sh
 !web/static/
 web/static/**
