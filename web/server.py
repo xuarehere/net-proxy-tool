@@ -195,7 +195,8 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 1
     result = {"name": name, "url": url, "request_url": url, "final_url": url,
               "desc": desc, "category": category, "status": "offline", "proxy_url": proxy_url,
               "tcp_ok": False, "path_verified": False, "response_received": False,
-              "http_ok": False, "redirects": [], "code": None, "error_type": None}
+              "http_ok": False, "redirects": [], "code": None, "error_type": None,
+              "tls_retries": 0, "tls_retry_reason": None}
     conn = None
     stage = "validation"
 
@@ -219,24 +220,36 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 1
                 result.update(error_type="redirect_loop", error="目标出现重定向循环")
                 break
             seen.add(current)
-            remaining = remaining_time()
-            # Each hop explicitly connects to the selected proxy, irrespective of NO_PROXY.
-            stage = "proxy_tcp"
-            conn = http.client.HTTPConnection(proxy.hostname, proxy.port, timeout=remaining)
+            for _ in range(2):
+                remaining = remaining_time()
+                # Every hop and TLS retry uses the selected proxy and the same deadline.
+                stage = "proxy_tcp"
+                conn = http.client.HTTPConnection(proxy.hostname, proxy.port, timeout=remaining)
+                if target.scheme == "https":
+                    conn.set_tunnel(target.hostname, target.port or 443)
+                    conn.sock = socket.create_connection((proxy.hostname, proxy.port or 80), remaining)
+                else:
+                    conn.connect()
+                result["tcp_ok"] = True
+                if target.scheme == "https":
+                    stage = "proxy_tunnel"
+                    conn.sock.settimeout(remaining_time())
+                    conn._tunnel()
+                    result["path_verified"] = True
+                    stage = "tls"
+                    conn.sock.settimeout(remaining_time())
+                    try:
+                        conn.sock = ssl.create_default_context().wrap_socket(conn.sock, server_hostname=target.hostname)
+                    except ssl.SSLEOFError as exc:
+                        conn.close()
+                        conn = None
+                        if result["tls_retries"]:
+                            raise
+                        remaining_time()
+                        result.update(tls_retries=1, tls_retry_reason=str(exc))
+                        continue
+                break
             if target.scheme == "https":
-                conn.set_tunnel(target.hostname, target.port or 443)
-                conn.sock = socket.create_connection((proxy.hostname, proxy.port or 80), remaining)
-            else:
-                conn.connect()
-            result["tcp_ok"] = True
-            if target.scheme == "https":
-                stage = "proxy_tunnel"
-                conn.sock.settimeout(remaining_time())
-                conn._tunnel()
-                result["path_verified"] = True
-                stage = "tls"
-                conn.sock.settimeout(remaining_time())
-                conn.sock = ssl.create_default_context().wrap_socket(conn.sock, server_hostname=target.hostname)
                 path = urllib.parse.urlunsplit(("", "", target.path or "/", target.query, ""))
             else:
                 path = current

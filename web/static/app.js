@@ -238,6 +238,7 @@ document.addEventListener("DOMContentLoaded", () => {
       else if (result.response_received) rows.push("已收到响应，目标请求未成功");
       else rows.push("代理请求失败");
     }
+    if (result.tls_retries) rows.push("首次 TLS 握手被中断，已重新连接一次");
     if (result.code) rows.push("HTTP " + result.code);
     if (result.latency_ms != null) rows.push(result.latency_ms + " ms");
     const phase = {validation: "地址校验", proxy_tcp: "网关 TCP", proxy_tunnel: "代理 CONNECT",

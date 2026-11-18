@@ -56,6 +56,8 @@ Open `http://127.0.0.1:8899/` on the host. Stop with `docker compose down`. Insi
 
 ## Diagnose by symptom
 
+If the peer closes a TLS handshake before the GET is sent, the gateway probe reconnects once within the original time budget. The result records the retry. Certificate validation failures are reported immediately.
+
 | Symptom | Check |
 | --- | --- |
 | Windows reports that `roxy-tool` or `2` is not a command | Extract the entire v1.4.1 Windows ZIP into a new directory and use its root `Start.bat`. The older UTF-8/LF batch file could parse incorrectly under code page 936. |

@@ -26,7 +26,7 @@ class RecordingProxy(BaseHTTPRequestHandler):
         suffix = self.path.rsplit("/", 1)[-1]
         code, location = 200, None
         if suffix == "redirect":
-            code, location = 302, "http://second.invalid/final"
+            code, location = 302, getattr(self.server, "redirect_url", "http://second.invalid/final")
         elif suffix == "loop":
             code, location = 302, self.path
         elif suffix.startswith("hop"):
@@ -53,6 +53,14 @@ class RecordingProxy(BaseHTTPRequestHandler):
         self.server.hits.append("CONNECT " + self.path)
         self.send_response(self.server.connect_code)
         self.end_headers()
+
+
+class HandshakeProxy(RecordingProxy):
+    protocol_version = "HTTP/1.1"
+
+    def do_CONNECT(self):
+        super().do_CONNECT()
+        self.close_connection = False
 
 
 class ProxyDiagnosticsTests(unittest.TestCase):
@@ -102,6 +110,8 @@ class ProxyDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result["error_type"], "proxy_auth")
         self.assertFalse(result["response_received"])
         self.assertTrue(result["tcp_ok"])
+        self.assertEqual(result["tls_retries"], 0)
+        self.assertEqual(len(self.proxy.hits), 1)
         self.proxy.connect_code = 200
         context = ssl.create_default_context()
         self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
@@ -110,6 +120,68 @@ class ProxyDiagnosticsTests(unittest.TestCase):
                 result = server.check_http_target("tls", "https://target.invalid/", self.url)
         self.assertEqual(result["error_type"], "tls_certificate")
         self.assertFalse(result["http_ok"])
+        self.assertEqual(result["tls_retries"], 0)
+        self.assertEqual(len(self.proxy.hits), 2)
+
+    def tls_fixture(self, outcomes, suffix="final", first_handshake_seconds=5):
+        """Keep CONNECT/GET real and inject only the TLS handshake outcome."""
+        self.proxy.RequestHandlerClass = HandshakeProxy
+        self.proxy.connect_code = 200
+        self.proxy.redirect_url = "https://second.invalid/final"
+        clock = [0.0]
+        sockets, timeouts = [], []
+
+        def handshake(sock, **kwargs):
+            if sockets:
+                self.assertEqual(sockets[-1].fileno(), -1, "previous tunnel must close before another handshake")
+            sockets.append(sock)
+            timeouts.append(sock.gettimeout())
+            if len(sockets) == 1:
+                clock[0] = first_handshake_seconds
+            outcome = outcomes[len(sockets) - 1]
+            if outcome is not None:
+                raise outcome
+            return sock
+
+        with patch.object(server.time, "monotonic", side_effect=lambda: clock[0]):
+            with patch.object(ssl, "create_default_context") as context:
+                context.return_value.wrap_socket.side_effect = handshake
+                result = server.check_http_target("TLS fixture", "https://target.invalid/" + suffix, self.url)
+        self.assertTrue(all(sock.fileno() == -1 for sock in sockets))
+        return result, timeouts
+
+    def test_tls_eof_retry_closes_tunnel_and_shares_deadline(self):
+        eof = ssl.SSLEOFError("UNEXPECTED_EOF_WHILE_READING")
+        result, timeouts = self.tls_fixture([eof, None])
+        self.assertTrue(result["http_ok"], result)
+        self.assertEqual(result["tls_retries"], 1)
+        self.assertIn("UNEXPECTED_EOF", result["tls_retry_reason"])
+        self.assertEqual(timeouts, [15.0, 10.0])
+        self.assertEqual(self.proxy.hits, ["CONNECT target.invalid:443", "CONNECT target.invalid:443", "/final"])
+
+    def test_tls_eof_retry_is_once_for_the_whole_redirect_chain(self):
+        eof = ssl.SSLEOFError("UNEXPECTED_EOF_WHILE_READING")
+        result, timeouts = self.tls_fixture([eof, None, eof], suffix="redirect")
+        self.assertEqual(result["error_type"], "tls_handshake")
+        self.assertEqual(result["tls_retries"], 1)
+        self.assertEqual(len(timeouts), 3)
+        self.assertEqual(self.proxy.hits, ["CONNECT target.invalid:443", "CONNECT target.invalid:443",
+                                          "/redirect", "CONNECT second.invalid:443"])
+
+    def test_repeated_tls_eof_stops_after_one_retry(self):
+        eof = ssl.SSLEOFError("UNEXPECTED_EOF_WHILE_READING")
+        result, timeouts = self.tls_fixture([eof, eof])
+        self.assertEqual(result["error_type"], "tls_handshake")
+        self.assertEqual(result["tls_retries"], 1)
+        self.assertEqual(len(timeouts), 2)
+        self.assertEqual(self.proxy.hits, ["CONNECT target.invalid:443"] * 2)
+
+    def test_tls_eof_cannot_restart_exhausted_budget(self):
+        result, timeouts = self.tls_fixture([ssl.SSLEOFError("EOF")], first_handshake_seconds=15)
+        self.assertEqual(result["error_type"], "timeout")
+        self.assertEqual(result["tls_retries"], 0)
+        self.assertEqual(timeouts, [15.0])
+        self.assertEqual(self.proxy.hits, ["CONNECT target.invalid:443"])
 
     def test_invalid_input_never_connects(self):
         for url in ("file:///tmp/a", "https://user:password@example.com/", "https://example.com/\r\nX: a"):
