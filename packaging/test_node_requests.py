@@ -93,8 +93,14 @@ def main(node_image, controller_image):
                 '--entrypoint','sh',node_image,'-ec',node_start)
             for _ in range(30):
                 if run('docker','exec',target,'sh','-c','test -s /tmp/npt-host-key.pub && echo ready',check=False) == 'ready':
-                    break
+                    banner = run('docker','exec',controller,'python','-c',
+                                 "import socket; s=socket.create_connection(('node',22),1); s.settimeout(1); "
+                                 "print('ready' if s.recv(256).startswith(b'SSH-') else ''); s.close()", check=False)
+                    if banner == 'ready':
+                        break
                 time.sleep(0.2)
+            else:
+                raise RuntimeError('Disposable SSH node did not generate its host key and start listening')
             run('docker','exec','-i','-u','npttester',target,'sh','-ec',
                 'umask 077; cat > /tmp/npt-user/.ssh/authorized_keys; printf "silent\\n" > /tmp/npt-user/.curlrc',
                 data=(public_key+'\n').encode())

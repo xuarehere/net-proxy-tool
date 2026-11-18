@@ -119,8 +119,20 @@ DisableForwarding yes
             if pidfile.exists():
                 break
             time.sleep(0.1)
+        else:
+            raise RuntimeError("Disposable SSH daemon did not create its PID file")
         ssh_pid = pidfile.read_text(encoding="ascii").strip()
         cleanup.callback(invoke, "sudo", "-n", "kill", ssh_pid, check=False)
+        for _ in range(30):
+            try:
+                with socket.create_connection(("127.0.0.1", ssh_port), timeout=0.5) as connection:
+                    if connection.recv(256).startswith(b"SSH-"):
+                        break
+            except OSError:
+                pass
+            time.sleep(0.1)
+        else:
+            raise RuntimeError("Disposable SSH daemon did not accept SSH connections")
         node = {"id": "host-test", "name": "docker via ssh", "host": "127.0.0.1", "ssh_host": "127.0.0.1",
                 "ssh_user": runner, "port": ssh_port, "os_type": "docker", "access_mode": "docker_host",
                 "container_name": target}

@@ -8,14 +8,48 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import tempfile
+import time
 import unittest
 import uuid
 from unittest.mock import patch
 
 from sdk.config import load_config, save_config
 from web import server, ssh_askpass
+
+
+def wait_for_disposable_ssh(docker, name, port, timeout=30):
+    """Read only this fixture's key, and wait for its published SSH protocol banner."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        result = docker('exec', name, 'cat', '/etc/ssh/ssh_host_ed25519_key.pub', check=False)
+        key = result.stdout.decode('utf-8', 'replace').split()
+        if result.returncode == 0 and result.stdout.endswith(b'\n') and len(key) >= 2 and key[0] == 'ssh-ed25519':
+            try:
+                with socket.create_connection(('127.0.0.1', port), timeout=0.5) as connection:
+                    if connection.recv(256).startswith(b'SSH-'):
+                        return key
+            except OSError:
+                pass
+        time.sleep(0.1)
+    raise RuntimeError('Disposable SSH fixture did not produce its host key and accept SSH connections in time')
+
+
+class SSHFixtureReadinessTests(unittest.TestCase):
+    def test_waits_for_both_key_generation_and_ssh_listener(self):
+        missing = subprocess.CompletedProcess([], 1, b'', b'')
+        partial = subprocess.CompletedProcess([], 0, b'ssh-ed25519 fixture', b'')
+        ready = subprocess.CompletedProcess([], 0, b'ssh-ed25519 fixture fixture@node\n', b'')
+        with patch('time.sleep'), patch('socket.create_connection') as connect:
+            connect.side_effect = [ConnectionRefusedError(), connect.return_value]
+            connect.return_value.__enter__.return_value.recv.return_value = b'SSH-2.0-fixture\r\n'
+            with patch('subprocess.run', side_effect=[missing, partial, ready, ready]) as docker:
+                key = wait_for_disposable_ssh(docker, 'only-this-fixture', 2222)
+                self.assertEqual(docker.call_count, 4)
+                self.assertEqual(connect.call_count, 2)
+                self.assertEqual(key[:2], ['ssh-ed25519', 'fixture'])
 
 
 class SSHAuthTests(unittest.TestCase):
@@ -145,7 +179,7 @@ class NativePasswordIntegration(unittest.TestCase):
         secret = 'Fixture-only ' + uuid.uuid4().hex + ' !%& 中文'
         docker('exec', '-i', name, 'chpasswd', data=('tester:' + secret + '\n').encode())
         port = int(docker('port', name, '22/tcp').stdout.decode().strip().rsplit(':', 1)[1])
-        host_key = docker('exec', name, 'cat', '/etc/ssh/ssh_host_ed25519_key.pub').stdout.decode().split()
+        host_key = wait_for_disposable_ssh(docker, name, port)
         with tempfile.TemporaryDirectory(prefix='npt 中文 space-') as directory:
             path = Path(directory)
             known = path / 'known_hosts'
