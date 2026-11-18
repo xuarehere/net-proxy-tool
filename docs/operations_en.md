@@ -86,3 +86,5 @@ Before enabling a worker, open a fresh SSH login as its configured user and run 
 Disable restores the files and environment captured before activation. A system login script can still supply the original proxy. Check the registration status, restoration evidence and request result separately. Review reported differences if the identity changed, the baseline is missing or a file has been edited. Restore an active worker before deletion or changing its execution identity, and check the displayed selection before a batch operation.
 
 The downloadable session scripts also preserve the original proxy variables. The optional container helper installer stops on a path collision. Run the same installer with `--uninstall` to remove helpers whose contents still match the installed copies.
+
+For console API automation, read each node’s `id`, `node_revision`, `bound_gateway_id` and `binding_revision` from `GET /api/config`. A single switch identifies the node with `node_id`. A batch sends a `nodes` array naming each selection and its observed revision. On HTTP 409, reload the configuration and check the identity and binding before submitting again.

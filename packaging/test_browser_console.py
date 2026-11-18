@@ -353,13 +353,23 @@ def run(screenshot=None):
             expect(form("sb-diag-rate-val")).to_have_text("HTTP 200")
             assert gw.requests[before:] == [FINAL]
         cfg = load_config()
-        cfg["clients"][1].update(os_type="windows", host="127.0.0.1", access_mode="local")
+        cfg["clients"][1].update(host="127.0.0.1", access_mode="local", is_proxy_enabled=False)
         save_config(cfg)
         page.reload()
         page.locator('[data-tab="tab-topology"]').click()
-        form("top-clients-tbody").locator('[data-action="toggle-client"][data-id="node-two"]').click()
-        expect(form("tab-sandbox")).to_be_visible()
-        expect(form("sb-gw-override-select")).to_have_value(gateways[1].gateway_id)
+        local_action = form("top-clients-tbody").locator('[data-action="toggle-client"][data-id="node-two"]')
+        if os.name == "nt":
+            local_action.click()
+            expect(form("tab-sandbox")).to_be_visible()
+            expect(form("sb-gw-override-select")).to_have_value(gateways[1].gateway_id)
+        else:
+            commands.clear()
+            with patch.object(server, "apply_node_proxy", side_effect=dispatch):
+                with page.expect_response("**/api/node-switch") as switched:
+                    local_action.click()
+                assert switched.value.json()["success"], switched.value.json()
+            assert commands == [("node-two", gateways[1].gateway_id, "on")]
+            expect(form("tab-topology")).to_be_visible()
         gateway_failure_flow(page, url)
         assert not errors, errors
 
