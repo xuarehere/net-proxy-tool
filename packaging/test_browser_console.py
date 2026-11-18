@@ -84,7 +84,7 @@ def gateway_failure_flow(page, url):
             with page.expect_response("**/api/test-gateway") as response:
                 test.click()
         body = response.value.json()
-        expect(result.locator("strong")).to_have_text(gateway_tls_fixture.FINAL + " 的TLS 握手超时，未取得最终 HTTP 响应")
+        expect(result.locator("strong")).to_have_text("TLS 握手超时 · " + gateway_tls_fixture.FINAL + " 未返回最终 HTTP 响应")
         result.locator("summary").click()
         for evidence in ("TLS 握手 EOF", "第 1 跳（重试）", gateway_tls_fixture.SECOND,
                          "第 3 跳", "首跳 HTTP 302 → 未收到最终 HTTP 状态"):
@@ -202,6 +202,14 @@ def run(screenshot=None):
         expect(form("setup-result")).to_contain_text("TCP 已连接")
         expect(form("setup-command")).to_contain_text("http://browser-fixture.invalid/forbidden")
         expect(form("setup-compare")).to_be_visible()
+        form("setup-compare").click()
+        again = "http://browser-fixture.invalid/forbidden"
+        expect(form("sb-cmd-input")).to_have_value(again)
+        expect(form("sb-gw-override-select")).to_have_value(gateways[1].gateway_id)
+        before = list(gateways[1].requests)
+        form("sb-run-btn").click()
+        expect(form("sb-diag-rate-val")).to_have_text("HTTP 403")
+        assert gateways[1].requests == before + [again]
 
         cfg = load_config()
         assert len(cfg["gateways"]) == 2

@@ -300,11 +300,11 @@ document.addEventListener("DOMContentLoaded", () => {
       tls: "TLS 握手", http_response: "等待目标响应", response_body: "读取响应内容"};
     const final = result.final_url || result.request_url || result.url;
     if (result.error_type === "timeout") {
-      return (final || "请求") + " 的" + (phase[result.stage] || "请求") + "超时，未取得最终 HTTP 响应";
+      return (phase[result.stage] || "请求") + "超时 · " + (final || "目标") + " 未返回最终 HTTP 响应";
     }
-    if (result.stage === "proxy_tunnel" || result.error_type === "proxy_auth") {
+    if (result.stage === "proxy_tunnel" || ["proxy_tunnel", "proxy_auth"].includes(result.error_type)) {
       return "代理" + (result.error_type === "proxy_auth" ? "要求身份验证" : "拒绝建立隧道") +
-        (result.code ? "（" + (result.stage === "proxy_tunnel" ? "CONNECT " : "HTTP ") + result.code + "）" : "");
+        (result.code ? "（" + (result.stage === "proxy_tunnel" || result.connect_status === result.code ? "CONNECT " : "HTTP ") + result.code + "）" : "");
     }
     if (result.error_type?.startsWith("redirect_")) return result.error || "重定向未完成";
     if (result.response_received && result.code) return "目标请求未成功 · HTTP " + result.code;
@@ -315,7 +315,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const rows = [];
     if (result.proxy_url) rows.push("代理网关 · " + result.proxy_url);
     const start = result.request_url || result.url;
-    if (start) rows.push("请求 · GET " + start);
+    if (start) rows.push("请求 · " + (result.method || "GET") + " " + start);
     for (const attempt of result.attempts || []) {
       const tls = {passed: "TLS 已验证", eof: "TLS 握手 EOF", timeout: "TLS 握手超时",
         certificate_error: "TLS 证书验证失败", failed: "TLS 握手失败"};
@@ -330,7 +330,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (!result.attempts?.length && result.tcp_ok != null) rows.push("网关 TCP " + (result.tcp_ok ? "已连接" : "未连接"));
     if (result.first_status != null || result.final_status != null) {
-      rows.push("首跳 HTTP " + result.first_status + " → " +
+      rows.push((result.first_status ? "首跳 HTTP " + result.first_status : "首跳状态未知") + " → " +
         (result.final_status == null ? "未收到最终 HTTP 状态" : "最终 HTTP " + result.final_status));
     }
     if (result.tls_retries) rows.push("TLS 握手 EOF 后已重连一次");
@@ -1110,7 +1110,8 @@ document.addEventListener("DOMContentLoaded", () => {
   function showBusinessMetrics(data) {
     sbGwStatusVal.textContent = data.tcp_ok == null ? "尚无结果" : (data.tcp_ok ? "已连接" : "连接失败");
     sbGwRttSub.textContent = data.tcp_latency_ms != null ? data.tcp_latency_ms + " ms" : "";
-    sbDiagRateVal.textContent = data.code ? "HTTP " + data.code : "未收到响应";
+    const finalCode = data.final_status ?? (data.response_received ? data.code : null);
+    sbDiagRateVal.textContent = finalCode ? "HTTP " + finalCode : "未收到最终响应";
     sbDiagSummary.textContent = data.error || data.final_url || data.request_url || "";
   }
 

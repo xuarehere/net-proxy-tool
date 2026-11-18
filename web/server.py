@@ -364,8 +364,8 @@ def run_diagnostic_request(request, proxy_url):
                    "--proto-redir", "=https" if request["url"].startswith("https:") else "=http,https",
                    "--location", "--max-redirs", "5", "--connect-timeout", "4",
                    "--max-time", "12", "--max-filesize", "65536", "--limit-rate", "64k",
-                   "--dump-header", str(header_path), "--output", str(body_path),
-                   "--write-out", "%{http_code}\n%{url_effective}\n%{num_redirects}\n%{remote_ip}"]
+                   "--suppress-connect-headers", "--dump-header", str(header_path), "--output", str(body_path),
+                   "--write-out", "%{http_code}\n%{url_effective}\n%{num_redirects}\n%{remote_ip}\n%{http_connect}"]
         if request["method"] == "HEAD":
             command.append("--head")
         command.extend(["--url", request["url"]])
@@ -382,15 +382,18 @@ def run_diagnostic_request(request, proxy_url):
         if body_path.exists():
             with body_path.open("rb") as stream:
                 body = stream.read(4097)
-        response_codes = re.findall(r"^HTTP/\S+ (\d{3})", headers, flags=re.MULTILINE)
-        tunnel_code = int(response_codes[-1]) if response_codes and code is None else None
+        response_codes = re.findall(r"^HTTP/\S+ ([2-5]\d{2})", headers, flags=re.MULTILINE)
+        tunnel_code = int(metadata[4]) if len(metadata) > 4 and metadata[4].isdigit() and metadata[4] != "000" else None
+        final_code = code if not completed.returncode or code not in (301, 302, 303, 307, 308) else None
         ok = completed.returncode == 0 and code is not None and 200 <= code < 300
         result = {"status": "online" if ok else "offline", "success": ok, "http_ok": ok,
                   "url": request["url"], "request_url": request["url"],
                   "final_url": metadata[1] if len(metadata) > 1 else request["url"],
-                  "proxy_url": proxy_url, "method": request["method"], "code": code or tunnel_code,
-                  "response_received": code is not None, "path_verified": bool(headers),
-                  "tcp_ok": bool(headers) or bool(len(metadata) > 3 and metadata[3]),
+                  "proxy_url": proxy_url, "method": request["method"], "code": final_code or (tunnel_code if tunnel_code != 200 else None),
+                  "first_status": int(response_codes[0]) if response_codes else None, "final_status": final_code,
+                  "connect_status": tunnel_code, "response_received": final_code is not None,
+                  "path_verified": bool(headers) or tunnel_code == 200,
+                  "tcp_ok": bool(headers or tunnel_code) or bool(len(metadata) > 3 and metadata[3]),
                   "headers": headers, "preview": body[:4096].decode("utf-8", errors="replace"),
                   "preview_truncated": len(body) > 4096,
                   "redirect_count": int(metadata[2]) if len(metadata) > 2 and metadata[2].isdigit() else 0,
@@ -402,7 +405,7 @@ def run_diagnostic_request(request, proxy_url):
                                     63: "response_too_large"}.get(completed.returncode, "http_status")
             if result["code"] == 407:
                 result["error_type"] = "proxy_auth"
-            elif tunnel_code:
+            elif tunnel_code and tunnel_code != 200:
                 result["error_type"] = "proxy_tunnel"
             result["error"] = completed.stderr[:2048].decode("utf-8", errors="replace").strip() or f"HTTP {code}"
         return result
