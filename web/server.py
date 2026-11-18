@@ -181,7 +181,7 @@ def diagnostic_command(payload):
     return {"url": urllib.parse.urlunsplit(diagnostic_url(urls[0])), "method": method}
 
 
-def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 4.5, include_preview=False):
+def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 15.0, include_preview=False):
     if isinstance(target_info, dict):
         url = target_info.get("url", "")
         desc = target_info.get("desc", "")
@@ -198,6 +198,13 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 4
               "http_ok": False, "redirects": [], "code": None, "error_type": None}
     conn = None
     stage = "validation"
+
+    def remaining_time():
+        remaining = timeout - (time.monotonic() - started)
+        if remaining <= 0:
+            raise TimeoutError("代理请求超过总超时")
+        return remaining
+
     try:
         target = diagnostic_url(url)
         proxy = urllib.parse.urlsplit(proxy_url)
@@ -212,9 +219,7 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 4
                 result.update(error_type="redirect_loop", error="目标出现重定向循环")
                 break
             seen.add(current)
-            remaining = timeout - (time.monotonic() - started)
-            if remaining <= 0:
-                raise TimeoutError("代理请求超过总超时")
+            remaining = remaining_time()
             # Each hop explicitly connects to the selected proxy, irrespective of NO_PROXY.
             stage = "proxy_tcp"
             conn = http.client.HTTPConnection(proxy.hostname, proxy.port, timeout=remaining)
@@ -226,15 +231,18 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 4
             result["tcp_ok"] = True
             if target.scheme == "https":
                 stage = "proxy_tunnel"
+                conn.sock.settimeout(remaining_time())
                 conn._tunnel()
                 result["path_verified"] = True
                 stage = "tls"
+                conn.sock.settimeout(remaining_time())
                 conn.sock = ssl.create_default_context().wrap_socket(conn.sock, server_hostname=target.hostname)
                 path = urllib.parse.urlunsplit(("", "", target.path or "/", target.query, ""))
             else:
                 path = current
             path = urllib.parse.quote(path, safe="/:%?=&+#@!$'()*;,~-._[]")
             stage = "http_response"
+            conn.sock.settimeout(remaining_time())
             conn.request("GET", path, headers={"Host": target.netloc, "User-Agent": "net-proxy-tool/1.4"})
             response = conn.getresponse()
             result.update(code=response.status, response_received=True, path_verified=True)
@@ -638,7 +646,8 @@ def check_node_http(target, gateway=None, target_url="https://example.com/"):
             proxy = gateway_url(gateway)
             result["proxy_url"] = proxy
             command += ["-q", "--proxy", proxy, "--noproxy", ""]
-        command += ["--silent", "--show-error", "--output", os.devnull if local else "/dev/null",
+        command += ["--request", "GET", "--no-location", "--globoff",
+                    "--silent", "--show-error", "--output", os.devnull if local else "/dev/null",
                     "--write-out", "\nNPT_HTTP_RESULT:%{http_code}|%{remote_ip}|%{time_connect}\n",
                     "--connect-timeout", "3", "--max-time", "8", "--proto", "=http,https", "--url", target_url]
         if local:

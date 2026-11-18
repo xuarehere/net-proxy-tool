@@ -91,7 +91,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 packaging/test_compose.py
-      - name: Verify real SSH-to-Docker control and neighboring-container isolation
+      - name: Verify SSH-to-Docker traffic, restoration and neighboring-container isolation
         run: python3 packaging/test_docker_host.py
 
   release:

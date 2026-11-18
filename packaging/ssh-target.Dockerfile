@@ -1,6 +1,6 @@
-# Disposable SSH target used only by packaging/test_compose.py.
+# Disposable node for the Compose and SSH-to-Docker integration tests.
 FROM python:3.12-alpine
-RUN apk add --no-cache openssh-server git \
+RUN apk add --no-cache openssh-server git curl \
     && adduser -D tester && passwd -d tester \
     && mkdir -p /run/sshd /home/tester/.ssh \
     && chmod 700 /home/tester/.ssh && chown -R tester:tester /home/tester

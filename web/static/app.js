@@ -26,7 +26,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const pipeStep3 = document.getElementById("pipe-step-3");
   const pipeStep4 = document.getElementById("pipe-step-4");
 
-  const cardStep1 = document.getElementById("card-step-1");
   const cardStep2 = document.getElementById("card-step-2");
   const cardStep3 = document.getElementById("card-step-3");
   const cardStep4 = document.getElementById("card-step-4");
@@ -178,8 +177,13 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!res.ok) throw new Error("加载配置失败: " + res.status);
       appConfig = await res.json();
       renderAll();
-
+      setupControls.disabled = false;
+      setupReload.hidden = true;
     } catch (err) {
+      if (setupControls.disabled) {
+        setupResult.textContent = err.message;
+        setupReload.hidden = false;
+      }
       console.error(err);
       globalStatusText.textContent = "配置加载失败";
       globalStatusPill.querySelector(".status-indicator-dot").className = "status-indicator-dot offline";
@@ -188,6 +192,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const setupForm = document.getElementById("setup-form");
   const setupResult = document.getElementById("setup-result");
+  const setupControls = document.getElementById("setup-controls");
+  const setupReload = document.getElementById("setup-reload");
+  setupReload.addEventListener("click", loadConfig);
   const setupHost = document.getElementById("setup-host");
   const setupPort = document.getElementById("setup-port");
   const setupName = document.getElementById("setup-name");
@@ -211,6 +218,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const setupDefault = document.getElementById("setup-default");
   let setupId = null;
   let setupRevision = 0;
+  let setupDirty = false;
 
   function gatewayAddress(gateway) {
     const host = gateway.host.includes(":") ? "[" + gateway.host + "]" : gateway.host;
@@ -218,7 +226,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function probeSummary(result) {
-    const rows = [result.tcp_ok ? "网关 TCP 已连接" : "网关 TCP 连接失败"];
+    const rows = [result.tcp_ok == null ? "尚无 TCP 结果" : (result.tcp_ok ? "网关 TCP 已连接" : "网关 TCP 连接失败")];
     if (result.tcp_ok) {
       if (result.path_verified) rows.push("已验证代理路径");
       if (result.online || result.http_ok) rows.push("代理请求成功");
@@ -227,6 +235,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (result.code) rows.push("HTTP " + result.code);
     if (result.latency_ms != null) rows.push(result.latency_ms + " ms");
+    const phase = {validation: "地址校验", proxy_tcp: "网关 TCP", proxy_tunnel: "代理 CONNECT",
+      tls: "TLS 握手", http_response: "目标响应"};
+    if (result.error_type) rows.push((phase[result.stage] || "请求") + " · " + result.error_type);
     if (result.error) rows.push(result.error);
     const redirects = result.redirects?.length || result.redirect_count;
     if (redirects) rows.push("重定向 " + redirects + " 次");
@@ -245,6 +256,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const gw = appConfig.gateways.find(item => item.id === id);
     setupId = gw?.id || "";
     setupSelect.value = setupId;
+    setupDirty = false;
     setupName.value = gw?.name || "本机代理";
     setupHost.value = gw?.host || "";
     setupPort.value = gw?.port || "";
@@ -254,7 +266,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   setupSelect.addEventListener("change", () => selectSetupGateway(setupSelect.value));
-  setupForm.addEventListener("input", clearSetupResult);
+  setupForm.addEventListener("input", event => {
+    if ([setupName, setupHost, setupPort].includes(event.target)) setupDirty = true;
+    clearSetupResult();
+  });
 
   setupDefault.addEventListener("click", async () => {
     setupDefault.disabled = true;
@@ -277,6 +292,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (setupId) payload.id = setupId;
       const data = await postJson(setupId ? "/api/gateways/update" : "/api/gateways/add", payload);
       setupId = data.gateway.id;
+      setupDirty = false;
       await loadConfig();
       setupResult.textContent = "已保存网关。点击“发送代理请求”以验证目标站点。";
     } catch (error) {
@@ -302,7 +318,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const windows = navigator.platform.startsWith("Win");
         const quote = value => "'" + value.replaceAll("'", windows ? "''" : "'\\''") + "'";
         setupCommand.textContent = (windows ? "curl.exe" : "curl") +
-          " --noproxy " + (windows ? '""' : "''") + " --proxy " + quote(gatewayAddress(gateway)) +
+          " --noproxy " + (windows ? "' '" : "''") + " --proxy " + quote(gatewayAddress(gateway)) +
           " --location --url " + quote(data.request_url || target);
         setupCommand.hidden = false;
       }
@@ -319,7 +335,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     setupSelect.replaceChildren(new Option("新增网关", ""));
     gateways.forEach(gw => setupSelect.add(new Option("编辑 " + gw.name + " (" + gw.host + ":" + gw.port + ")", gw.id)));
-    selectSetupGateway(setupId === null ? activeGateway?.id : setupId);
+    if (setupDirty && (!setupId || gateways.some(gw => gw.id === setupId))) {
+      setupSelect.value = setupId;
+      setupDefault.hidden = !setupId || setupId === activeGateway?.id;
+    } else {
+      selectSetupGateway(setupId === null ? activeGateway?.id : setupId);
+    }
 
     if (activeGateway) {
       const gwStr = `${activeGateway.host}:${activeGateway.port}`;
@@ -355,6 +376,9 @@ document.addEventListener("DOMContentLoaded", () => {
     cardStep3.classList.add("locked-card");
     cardStep4.classList.add("locked-card");
     pipeStep3.className = pipeStep4.className = "pipeline-step locked";
+    for (const [step, number] of [[pipeStep2, 2], [pipeStep3, 3], [pipeStep4, 4]]) {
+      step.querySelector(".pipe-num").textContent = number;
+    }
     statusTagStep2.textContent = "等待保存绑定";
     statusTagStep3.textContent = "等待验证";
     statusTagStep4.textContent = "等待交付";
@@ -450,6 +474,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!selectedWizardGateway) { setupHost.focus(); return; }
     if (!wizardTestUrl.reportValidity()) return;
     const gateway = selectedWizardGateway;
+    const target = wizardTestUrl.value.trim();
     resetWizard();
     wizardTestGwBtn.disabled = true;
     wizardTestGwBtn.innerHTML = '<span class="btn-icon">⏳</span> 正在探测网关...';
@@ -467,7 +492,7 @@ document.addEventListener("DOMContentLoaded", () => {
         })
       });
       const data = await res.json();
-      if (selectedWizardGateway?.id !== gateway.id) return;
+      if (selectedWizardGateway?.id !== gateway.id || target !== wizardTestUrl.value.trim()) return;
       if (data.online) {
         step1Result.className = "step-result-banner success";
         step1Result.textContent = probeSummary(data);
@@ -503,8 +528,7 @@ document.addEventListener("DOMContentLoaded", () => {
         body: JSON.stringify({ gateway_id: selectedWizardGateway.id })
       });
       if (res.ok) {
-        appConfig.active_gateway_id = selectedWizardGateway.id;
-        renderAll();
+        await loadConfig();
         alert(`已成功将【${selectedWizardGateway.name}】设为全局默认网关！`);
       }
     } catch (e) {
@@ -623,8 +647,9 @@ document.addEventListener("DOMContentLoaded", () => {
           rtt.textContent = `${target.latency_ms} ms`;
         } else {
           pill.className = "t-pill failed";
-          pill.textContent = "🔴 失败";
-          rtt.textContent = target.error ? target.error.slice(0, 15) : "超时";
+          pill.textContent = target.code ? "HTTP " + target.code : "请求未成功";
+          rtt.textContent = target.error || "请查看网关与目标地址";
+          el.title = probeSummary(target);
         }
       });
 
@@ -811,7 +836,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function showBusinessMetrics(data) {
-    sbGwStatusVal.textContent = data.tcp_ok ? "已连接" : "连接失败";
+    sbGwStatusVal.textContent = data.tcp_ok == null ? "尚无结果" : (data.tcp_ok ? "已连接" : "连接失败");
     sbGwRttSub.textContent = data.tcp_latency_ms != null ? data.tcp_latency_ms + " ms" : "";
     sbDiagRateVal.textContent = data.code ? "HTTP " + data.code : "未收到响应";
     sbDiagSummary.textContent = data.error || data.final_url || data.request_url || "";
@@ -1036,7 +1061,7 @@ document.addEventListener("DOMContentLoaded", () => {
             body: JSON.stringify(nodeRequest(appConfig.clients.find(client => client.id === cid)))
           });
           const d = await res.json();
-          if (d.online) {
+          if (d.success) {
             if (rttPill) {
               rttPill.textContent = `${d.latency_ms}ms`;
               rttPill.style.color = "#4ade80";
@@ -1044,7 +1069,7 @@ document.addEventListener("DOMContentLoaded", () => {
             alert(nodeProbeSummary(d));
           } else {
             if (rttPill) {
-              rttPill.textContent = "超时";
+              rttPill.textContent = "未成功";
               rttPill.style.color = "#f87171";
             }
             alert(nodeProbeSummary(d));
@@ -1200,8 +1225,8 @@ document.addEventListener("DOMContentLoaded", () => {
               rttPill.textContent = `${h.latency_ms}ms`;
               rttPill.style.color = "#4ade80";
             } else {
-              rttPill.textContent = h.is_proxy_enabled ? "异常" : "直连";
-              rttPill.style.color = h.is_proxy_enabled ? "#f87171" : "var(--text-muted)";
+              rttPill.textContent = "未成功";
+              rttPill.style.color = "var(--danger)";
             }
           }
           summary.push(`• [${cid}]: ${h.online ? `🟢 畅通 (${h.latency_ms}ms)` : `⚪ ${h.status_line}`}`);
@@ -1672,7 +1697,7 @@ document.addEventListener("DOMContentLoaded", () => {
         modalClient.style.display = "none";
         await loadConfig();
         // 自动选中新加的节点
-        if (data.client) {
+        if (data.client && mode === "add") {
           wizardClientSelect.value = data.client.id;
           wizardClientSelect.dispatchEvent(new Event("change"));
         }

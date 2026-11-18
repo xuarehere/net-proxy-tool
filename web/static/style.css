@@ -1755,6 +1755,7 @@ body {
 #advanced-wizard summary { cursor: pointer; padding: .75rem 0; font-weight: bold; }
 @media (max-width: 640px) { .setup-fields { grid-template-columns: 1fr; } }
 
+#setup-controls { border: 0; min-width: 0; }
 .setup-selection { max-width: 32rem; margin-bottom: 1.25rem; }
 .setup-selection select { display: block; width: 100%; margin-top: .4rem; }
 #setup-result, #setup-command, #step-1-result, .feedback-content { white-space: pre-line; overflow-wrap: anywhere; }

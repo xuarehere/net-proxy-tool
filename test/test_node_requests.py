@@ -103,6 +103,31 @@ class NodeRequestTests(unittest.TestCase):
             self.assertEqual(result['stages']['http'], 'not_reached')
 
     @unittest.skipUnless(shutil.which('curl.exe' if os.name == 'nt' else 'curl'), 'requires curl')
+    def test_local_request_is_one_get_without_redirects_or_url_expansion(self):
+        seen = []
+        class Redirect(BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append((self.command, self.path))
+                self.send_response(302)
+                self.send_header('Location', '/must-not-follow')
+                self.end_headers()
+            def do_POST(self):
+                seen.append((self.command, self.path))
+                self.send_response(405)
+                self.end_headers()
+            def log_message(self, *args):
+                pass
+        origin = self.listen(Redirect)
+        (Path(os.environ['CURL_HOME']) / '.curlrc').write_text('request = "POST"\nlocation\n', encoding='utf-8')
+        env = {k: '' for k in ('http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
+                              'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY')}
+        with patch.dict(os.environ, env):
+            result = server.check_node_http({'host': '127.0.0.1'},
+                                            target_url=f'http://127.0.0.1:{origin.server_port}/[1-2]')
+        self.assertEqual(result['code'], 302, result)
+        self.assertEqual(seen, [('GET', '/[1-2]')])
+
+    @unittest.skipUnless(shutil.which('curl.exe' if os.name == 'nt' else 'curl'), 'requires curl')
     def test_local_explicit_proxy_and_ordinary_request_take_distinct_paths(self):
         proxy_hits, origin_hits = [], []
         class Origin(BaseHTTPRequestHandler):

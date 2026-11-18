@@ -5,12 +5,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 from pathlib import Path
 import tempfile
+import sys
 from threading import Thread
 from unittest.mock import patch
 
 from playwright.sync_api import expect, sync_playwright
 
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sdk.config import load_config, save_config
 from web import server
@@ -76,7 +76,19 @@ def run(screenshot=None):
         page = browser.new_page()
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
-        page.goto(url)
+        pending_config = []
+        def hold_config(route):
+            pending_config.append(route)
+        page.route("**/api/config?*", hold_config)
+        with page.expect_request("**/api/config?*"):
+            page.goto(url)
+        # A slow initial config cannot overwrite an edit or turn an add into an update.
+        expect(page.locator("#setup-name")).to_be_disabled()
+        expect(page.locator("#setup-save")).to_be_disabled()
+        assert len(pending_config) == 1
+        pending_config.pop().continue_()
+        page.unroute("**/api/config?*", hold_config)
+        expect(page.locator("#setup-name")).to_be_editable()
         def form(id):
             return page.locator("#" + id)
 
@@ -124,6 +136,18 @@ def run(screenshot=None):
         expect(form("status-tag-step-2")).to_contain_text("node-two")
         form("wizard-start-diag-btn").click()
         expect(form("handover-gw-name")).to_contain_text(str(gateways[1].server_port))
+        probes = []
+
+        def probe(node, gateway=None, target_url=None):
+            probes.append((node["id"], gateway and gateway["id"], target_url))
+            return {"online": bool(gateway), "status_line": "HTTP 200" if gateway else "HTTP 403",
+                    "stages": {"http": "passed" if gateway else "failed"}}
+
+        with patch.object(server, "check_node_http", side_effect=probe):
+            form("wizard-btn-node-test").click()
+            expect(form("wizard-feedback-content")).to_contain_text("显式指定网关 · 成功")
+            expect(form("wizard-feedback-content")).to_contain_text("普通 curl（目标当前设置） · 未成功")
+        assert probes == [("node-two", None, START), ("node-two", gateways[1].gateway_id, START)]
         commands = []
         def dispatch(node, action, config):
             commands.append((node["id"], node["bound_gateway_id"], action))
@@ -148,6 +172,14 @@ def run(screenshot=None):
             expect(form("sb-terminal-output")).to_contain_text("fixture proxy response")
             expect(form("sb-diag-rate-val")).to_have_text("HTTP 200")
             assert gw.requests[before:] == [FINAL]
+        cfg = load_config()
+        cfg["clients"][1].update(os_type="windows", host="127.0.0.1")
+        save_config(cfg)
+        page.reload()
+        page.locator('[data-tab="tab-topology"]').click()
+        form("top-clients-tbody").locator('[data-action="toggle-client"][data-id="node-two"]').click()
+        expect(form("tab-sandbox")).to_be_visible()
+        expect(form("sb-gw-override-select")).to_have_value(gateways[1].gateway_id)
         assert not errors, errors
 
 
