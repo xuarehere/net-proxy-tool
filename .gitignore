@@ -6,6 +6,8 @@
 config.json
 
 # 运行期安全操作审计日志流水
+data/instance.json
+data/launcher.lock
 data/audit.log
 data/*.log
 *.log
@@ -41,3 +43,5 @@ Desktop.ini
 test_temp/
 scratch/
 browser_sandbox/
+
+.codegraph/

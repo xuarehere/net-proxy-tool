@@ -42,6 +42,9 @@ jobs:
         run: |
           python -m pip install playwright==1.57.0
           python -m playwright install --with-deps chromium
+      - name: Verify multi-gateway and node selection in Chromium
+        if: matrix.target == 'windows-x64' || matrix.target == 'linux-x64'
+        run: python -X utf8 packaging/test_browser_console.py
       - name: Launch from a clean archive and configure a real local test proxy
         run: |
           mkdir -p "build/中文 Portable"
@@ -51,6 +54,7 @@ jobs:
             tar -xzf dist/*.tar.gz -C "build/中文 Portable"
           fi
           python -X utf8 packaging/smoke.py "build/中文 Portable/net-proxy-tool" --browser
+          python -X utf8 packaging/test_https_release.py "build/中文 Portable/net-proxy-tool"
       - name: Record Gatekeeper and quarantined first launch
         if: runner.os == 'macOS'
         run: python packaging/macos_gatekeeper.py "build/中文 Portable/net-proxy-tool"

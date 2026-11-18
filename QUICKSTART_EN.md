@@ -38,6 +38,8 @@ The macOS archives are terminal distributions and are not notarized with Apple D
 
 **Success** · A successful HTTP status from your target completes the first request. To run your next task, you can use the console or copy the displayed command. A site can require authentication or rate-limit requests, so check the returned status code.
 
+Use the add action for a second gateway. Check the selected gateway, the requested URL and the final HTTP status after redirects. For a Windows application, start it with the CLI or use the SDK in your own Python process. Save a separate gateway binding for a remote node before switching it.
+
 ![First-run Web console with gateway setup and request verification](docs/assets/console.png)
 
 **Stop the service** by running `.\Start.bat --stop` or `./net-proxy-tool --stop` from the extracted directory. Closing the browser tab leaves the service running. Your gateway will be available at the next start.

@@ -6,8 +6,8 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>Net-Proxy-Tool 通用跨平台局域网出海与 Docker 容器隔离控制中心 (v1.4.0)</title>
-  <link rel="stylesheet" href="style.css?v=1.4.0">
+  <title>Net-Proxy-Tool 通用跨平台局域网出海与 Docker 容器隔离控制中心 (v1.4.1)</title>
+  <link rel="stylesheet" href="style.css?v=1.4.1">
 </head>
 <body>
   <div class="app-layout">
@@ -16,7 +16,7 @@
       <div class="navbar-brand">
         <span class="brand-icon">🚀</span>
         <div class="brand-info">
-          <h1>Net-Proxy-Tool <span class="tag-version">v1.4.0</span></h1>
+          <h1>Net-Proxy-Tool <span class="tag-version">v1.4.1</span></h1>
           <p class="brand-sub">HTTP 代理控制台</p>
         </div>
       </div>
@@ -32,7 +32,7 @@
             <span class="nav-icon">🎯</span> 接入向导
           </button>
           <button class="nav-btn" data-tab="tab-sandbox">
-            <span class="nav-icon">⚡</span> 沙箱控制台
+            <span class="nav-icon">⚡</span> 业务请求
           </button>
           <button class="nav-btn" data-tab="tab-topology">
             <span class="nav-icon">🌐</span> 拓扑与节点管理
@@ -55,13 +55,15 @@
           <div class="card-header"><h2 id="setup-title">连接你的 HTTP 代理</h2></div>
           <p>填写已运行的 HTTP 或 mixed 代理监听地址。控制台从运行它的机器发送请求，本机代理请填写 127.0.0.1。</p>
           <form id="setup-form">
+            <label class="setup-selection">选择操作<select id="setup-select" class="form-select"><option value="">新增网关</option></select></label>
             <div class="setup-fields">
               <label>网关名称<input id="setup-name" class="form-input" required value="本机代理"></label>
               <label>代理地址<input id="setup-host" class="form-input" required placeholder="127.0.0.1"></label>
               <label>端口<input id="setup-port" class="form-input" type="number" required min="1" max="65535" placeholder="7890"></label>
             </div>
-            <button class="btn btn-secondary" id="setup-save" type="submit">保存网关</button>
-            <label class="setup-url">请求目标<input id="setup-url" class="form-input" type="url" value="https://example.com/"></label>
+            <button class="btn btn-secondary" id="setup-save" type="submit">保存新网关</button>
+            <button class="btn btn-secondary" id="setup-default" type="button" hidden>设为默认网关</button>
+            <label class="setup-url">请求目标<input required id="setup-url" class="form-input" type="url" value="https://example.com/"></label>
             <button class="btn btn-primary" id="setup-test" type="button">发送代理请求</button>
             <output id="setup-result" role="status" aria-live="polite"></output>
             <p id="setup-command" hidden></p>
@@ -114,6 +116,7 @@
                 <label for="wizard-gw-select">选择出网代理网关:</label>
                 <select id="wizard-gw-select" class="form-select"></select>
               </div>
+              <label>请求目标<input id="wizard-test-url" type="url" required class="form-input" value="https://example.com/"></label>
               <button class="btn btn-primary" id="wizard-test-gw-btn">
                 <span class="btn-icon">⚡</span> 探测该网关连通性
               </button>
@@ -147,7 +150,7 @@
                 <span class="btn-icon">➕</span> 登记新业务节点
               </button>
               <button class="btn btn-primary" id="wizard-confirm-client-btn">
-                <span class="btn-icon">✅</span> 确认选定并进入穿透体检
+                <span class="btn-icon">✅</span> 保存节点与网关绑定
               </button>
             </div>
             <!-- 节点属性卡片 -->
@@ -208,7 +211,7 @@
               <span class="handover-icon">🎉</span>
               <div class="handover-text">
                 <h4>请确认目标和网关，再下发代理配置。</h4>
-                <p>当前目标节点: <strong id="handover-target-name">未选择</strong> | 默认网关: <strong id="handover-gw-name">未选择</strong></p>
+                <p>当前目标节点: <strong id="handover-target-name">未选择</strong> | 已绑定网关: <strong id="handover-gw-name">未选择</strong></p>
               </div>
             </div>
 
@@ -276,13 +279,13 @@
 
 
       <!-- ============================================================== -->
-      <!-- TAB 2: ⚡ 沙箱控制台 (Sandbox Console, 日常高频调用) -->
+      <!-- TAB 2: ⚡ 业务请求 (Sandbox Console, 日常高频调用) -->
       <!-- ============================================================== -->
       <div class="tab-pane" id="tab-sandbox">
         <!-- 概览指标行 -->
         <div class="metrics-row">
           <div class="metric-card">
-            <span class="m-label">当前活跃代理网关</span>
+            <span class="m-label">本次请求的网关</span>
             <div class="m-val" id="sb-active-gw-val">尚未配置</div>
             <span class="m-sub" id="sb-active-gw-sub">请在接入向导保存网关</span>
           </div>
@@ -302,8 +305,8 @@
         <section class="card sandbox-exec-card">
           <div class="card-header">
             <div class="title-with-desc">
-              <h2>⚡ 在控制台主机运行命令</h2>
-              <span class="tag tag-sandbox">以控制台账号权限执行，请确认输入的命令</span>
+              <h2>从控制台主机发送 HTTP 请求</h2>
+              <span class="tag tag-sandbox">输入 HTTP 或 HTTPS 地址。请求经过所选网关发出；运行其他命令请使用 CLI。</span>
             </div>
             <div class="header-actions">
               <button class="btn btn-secondary btn-sm" id="sb-quick-diag-btn">
@@ -314,17 +317,18 @@
 
           <div class="sandbox-controls">
             <div class="cmd-input-wrapper">
-              <span class="cmd-prompt">with-proxy $</span>
-              <input type="text" id="sb-cmd-input" class="cmd-input" placeholder="输入待执行命令，例如: curl -I https://www.google.com" value="curl -I https://www.google.com">
+              <label for="sb-cmd-input" class="cmd-prompt">GET</label>
+              <input type="url" required id="sb-cmd-input" class="cmd-input" value="https://example.com/">
             </div>
 
             <div class="cmd-options-row">
               <div class="opt-group">
-                <label for="sb-template-select">快捷命令模板:</label>
+                <label for="sb-template-select">常用请求:</label>
                 <select id="sb-template-select" class="form-select">
-                  <option value="curl -I https://www.google.com">Google 连通性测试 (curl -I)</option>
-                  <option value="curl -I https://github.com">GitHub 连通性测试 (curl -I)</option>
-                  <option value="curl -s https://api.github.com/zen">GitHub Zen API 测试</option>
+                  <option value="https://example.com/">Example</option>
+                  <option value="https://www.google.com/">Google</option>
+                  <option value="https://github.com/">GitHub</option>
+                  <option value="https://api.github.com/zen">GitHub Zen API</option>
                 </select>
               </div>
 
@@ -336,7 +340,7 @@
               </div>
 
               <button class="btn btn-primary" id="sb-run-btn">
-                <span class="btn-icon">🚀</span> 使用代理运行
+                <span class="btn-icon">🚀</span> 发送 GET 请求
               </button>
             </div>
           </div>
@@ -349,13 +353,13 @@
                 <span class="t-light yellow"></span>
                 <span class="t-light green"></span>
               </div>
-              <span class="terminal-title">命令输出</span>
+              <span class="terminal-title">请求结果</span>
               <div class="terminal-actions">
                 <span id="sb-status-badge" class="badge-status idle">空闲就绪</span>
                 <button id="sb-clear-term-btn" class="btn-mini">清屏</button>
               </div>
             </div>
-            <pre id="sb-terminal-output" class="terminal-view"><span class="t-dim"># 控制台已就绪。输入待运行命令后点击【使用代理运行】...</span></pre>
+            <pre id="sb-terminal-output" class="terminal-view"><span class="t-dim">选择网关并输入目标地址后发送请求。</span></pre>
           </div>
         </section>
       </div>
@@ -530,7 +534,7 @@ with ProxySession():
 
     <!-- 页脚 -->
     <footer class="app-footer">
-      <span>Net-Proxy-Tool v1.4.0 · HTTP 代理控制台</span>
+      <span>Net-Proxy-Tool v1.4.1 · HTTP 代理控制台</span>
       <span>当前出网网关: <strong id="footer-gw-label">未配置</strong></span>
     </footer>
   </div>
@@ -747,6 +751,6 @@ with ProxySession():
     </div>
   </div>
 
-  <script src="app.js?v=1.4.0"></script>
+  <script src="app.js?v=1.4.1"></script>
 </body>
 </html>

@@ -1754,3 +1754,29 @@ body {
 #setup-result { min-height: 1.5rem; overflow-wrap: anywhere; }
 #advanced-wizard summary { cursor: pointer; padding: .75rem 0; font-weight: bold; }
 @media (max-width: 640px) { .setup-fields { grid-template-columns: 1fr; } }
+
+.setup-selection { max-width: 32rem; margin-bottom: 1.25rem; }
+.setup-selection select { display: block; width: 100%; margin-top: .4rem; }
+#setup-result, #setup-command, #step-1-result, .feedback-content { white-space: pre-line; overflow-wrap: anywhere; }
+#setup-command { user-select: all; }
+[hidden] { display: none !important; }
+
+@media (max-width: 640px) {
+  .navbar-right, .nav-tab-group { width: 100%; }
+  .nav-tab-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .nav-btn { justify-content: center; }
+  .setup-selection select, .cmd-input, .step-body-row > * { max-width: 100%; min-width: 0; }
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg-dark: #edf2f7; --bg-card: #fff; --bg-card-hover: #f1f5f9;
+    --bg-surface: #eef3f8; --bg-input: #fff; --border-color: #cbd5e1;
+    --border-light: #aab8cb; --text-main: #182638; --text-muted: #46566d;
+    --text-dim: #52647b; --primary: #075985; --primary-hover: #0369a1;
+    --success: #047857; --danger: #b91c1c; --warning: #92400e;
+    --shadow: 0 3px 14px rgba(30, 50, 80, .09);
+  }
+  .btn-primary { color: white; }
+  .terminal-view, .code-delivery-card pre { color: #e2e8f0; }
+}

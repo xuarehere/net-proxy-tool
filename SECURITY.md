@@ -6,6 +6,8 @@ The console runs commands with the privileges of its operating-system account. A
 
 The desktop launcher binds to loopback. Compose publishes the container port on the host's loopback interface. For a remote machine, use SSH port forwarding to reach the console. Keep the management port off public networks. Requests from untrusted browsers are checked against the allowed host and origin. The management API has no per-user login. Every local account or process that can connect to the loopback port can operate the console with the server account's privileges. On shared servers, isolate the listener in a dedicated network namespace or VM and restrict access to trusted operators. An SSH tunnel protects remote transport; it does not exclude other local clients.
 
+The console request runner accepts HTTP(S) probes. Run other application commands from a local terminal using the CLI. A remote test runs in the selected account or container. Review the node and gateway together before enabling a persistent configuration.
+
 ## Credentials and backups
 
 - Protect `config.json` and the adjacent `data/` directory with your account's filesystem permissions. The saved configuration can contain SSH login credentials. JSON API responses omit credential fields. `data/instance.json` includes the shutdown token.
