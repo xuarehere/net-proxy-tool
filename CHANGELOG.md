@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.2]
+
+- Worker Nodes Pool probes the selected URL on the target account. Google is the default, alongside Claude, ChatGPT, YouTube, Gemini and custom URLs. Existing customized diagnostic lists are preserved.
+- Compare the ordinary curl request and the explicit proxy request using the first response, redirects, final status, curl exit code and observed peer. SSH and Docker execution contexts are reported separately.
+- Enabling a legacy installation captures the existing proxy settings as its restoration baseline. Malformed managed profiles or edits to managed files surface a conflict.
+- Windows supports a configured node’s password SSH login. Trust the correct server key in the control account before using password authentication.
+- 升级时保留现有配置。节点池可以直接选择需要访问的站点，并从新开的 SSH 终端核对同一账号的结果。[操作与排障](docs/operations.md)
+- Stop the previous console before starting the new archive. See the [operations guide](docs/operations_en.md) for the SSH verification and terminal checks.
+
 ## [1.4.1]
 
 - Follow redirects through the selected proxy and report the final HTTP result. The wizard and topology use the same diagnostic result.

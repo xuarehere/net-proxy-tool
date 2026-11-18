@@ -1,5 +1,5 @@
 FROM python:3.12-alpine
-RUN apk add --no-cache openssh-client bash \
+RUN apk add --no-cache openssh-client bash curl \
     && addgroup -g 10001 proxytool \
     && adduser -D -u 10001 -G proxytool proxytool
 WORKDIR /app

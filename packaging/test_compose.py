@@ -39,6 +39,12 @@ def main():
              "--network-alias", "fixture-ssh", "-d", image])
         run(app + ["sh", "-ec", 'mkdir -p ~/.ssh; chmod 700 ~/.ssh; ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519'])
         key = run(app + ["sh", "-c", "cat ~/.ssh/id_ed25519.pub"])
+        for _ in range(30):
+            if run(["docker", "exec", target, "sh", "-c", "test -s /etc/ssh/ssh_host_ed25519_key.pub && echo ready"], check=False) == "ready":
+                break
+            time.sleep(0.1)
+        host_key = " ".join(run(["docker", "exec", target, "cat", "/etc/ssh/ssh_host_ed25519_key.pub"]).split()[:2])
+        run(app + ["sh", "-ec", "umask 077; cat > ~/.ssh/known_hosts"], ("fixture-ssh " + host_key + "\n").encode())
         run(["docker", "exec", "-i", "-u", "tester", target, "sh", "-ec",
              'umask 077; cat > /home/tester/.ssh/authorized_keys; printf "silent\\n" > /home/tester/.curlrc'],
             (key + "\n").encode())

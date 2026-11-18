@@ -46,6 +46,17 @@ macOS 便携包按终端命令分发，未做 Apple Developer ID 公证。Intel 
 
 **停止** · 关闭浏览器标签页后，服务仍会运行。在解压目录使用 `.\Start.bat --stop` 或 `./net-proxy-tool --stop`。再次启动会读取已保存的网关。
 
+## 从新开的 SSH 终端复测
+
+选择与节点池相同的主机、端口、账号和网址。宿主机 Docker 管理账号与容器账号可能不同。进入终端后，先运行原样请求，再单独记录最终结果：
+
+```sh
+curl https://www.google.com/
+curl -sS -L --max-time 30 -o /dev/null -w 'HTTP %{http_code}  redirects=%{num_redirects}  peer=%{remote_ip}:%{remote_port}\n' https://www.google.com/
+```
+
+302 表示收到了跳转；403 表示目标拒绝本次访问。curl 退出 35 表示 TLS 握手错误。记录每次请求的结果，结合节点池的普通请求和显式代理两行对照。
+
 ## 用源码或 Python 环境运行
 
 从源码目录执行以下命令，需要 Python 3.8 或更新版本。在 macOS / Linux 上用 `python3` 替代 `python`。从源码直接启动控制台无需安装第三方 Python 包。
@@ -64,7 +75,7 @@ net-proxy-tool
 保存网关后，让单次 curl 请求通过它。Windows 中用 `curl.exe`。
 
 ```console
-with-proxy curl -I https://example.com/
+with-proxy curl -L https://www.google.com/
 ```
 
 在同一个 Python 环境中也可以临时设置代理。SDK 改变当前 Python 进程的环境变量，同一进程中的其他线程也会看到这些值。
@@ -74,7 +85,7 @@ from urllib.request import urlopen
 from sdk import ProxySession
 
 with ProxySession():
-    with urlopen("https://example.com/", timeout=10) as response:
+    with urlopen("https://www.google.com/", timeout=10) as response:
         print(response.status)
 ```
 

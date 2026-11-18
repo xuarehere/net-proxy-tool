@@ -31,7 +31,7 @@ Saving the first gateway writes the configuration. The adjacent `data/` director
 
 Bind the node to a gateway, run its preflight check and test the switch on that node. Inspect individual results for batch operations. A remote node with a gateway of `127.0.0.1` connects to itself. Supply a gateway address reachable from that node.
 
-Remote switching can change curl, wget, pip, Git and shell configuration for the target account. A root account can also modify target system configuration. Version 1.4 keeps snapshots in the target account's `~/.local/state/net-proxy-tool/`. If a file was edited after activation, compare it with its snapshot and preserve the operator's changes. Legacy settings with no original snapshot also require review.
+Remote switching can change curl, wget, pip, Git and shell configuration for the target account. A root account can also modify target system configuration. Version 1.4 keeps snapshots in the target account's `~/.local/state/net-proxy-tool/`. If a file was edited after activation, compare it with its snapshot and preserve the operator's changes. When legacy settings have no snapshot, the first explicit enable saves the current files and permissions. Disable restores that baseline, which may already contain a proxy. If you disable before capturing a baseline, the tool leaves those settings in place and reports that manual review is required.
 
 ## When the console works but the workload fails
 
@@ -41,6 +41,14 @@ Remote switching can change curl, wget, pip, Git and shell configuration for the
 4. Restore the initial switch state. Keep both the snapshot and the current file when an operator edit requires a manual merge.
 
 In v1.3 the first wizard step checked TCP. In v1.4.0 it sent a real request but reported HTTP 302 as offline. Version 1.4.1 follows redirects through the selected gateway and reports proxy authentication, TLS and final HTTP results separately.
+
+### Compare the same URL in a terminal and on the node
+
+The worker pool defaults to `https://www.google.com/` and also offers Claude, ChatGPT, YouTube, Gemini and custom URLs. Examine the account, HOME, curl configuration, first response, final status and socket peer. The ordinary request uses that account’s settings. The explicit request selects the gateway. A matching peer supplies connection evidence. Independent public exit evidence requires a gateway log or a cooperating destination. HTTP 200 confirms access to the returned page.
+
+Both worker probes require curl 7.61 or later on the target account. Check with `curl --version` in the same terminal. [curl option versions](https://curl.se/docs/optionsall.html)
+
+On Windows, password SSH uses the control account’s OpenSSH client. Verify the host key and trust the exact host and port before using the saved identity. A node recorded as off can still inherit proxy settings from another tool or a login script.
 
 ## Use Docker Compose
 
@@ -60,7 +68,7 @@ If the peer closes a TLS handshake before the GET is sent, the gateway probe rec
 
 | Symptom | Check |
 | --- | --- |
-| Windows reports that `roxy-tool` or `2` is not a command | Extract the entire v1.4.1 Windows ZIP into a new directory and use its root `Start.bat`. The older UTF-8/LF batch file could parse incorrectly under code page 936. |
+| Windows reports that `roxy-tool` or `2` is not a command | Extract the entire Windows ZIP for the current release into a new directory and use its root `Start.bat`. The older UTF-8/LF batch file could parse incorrectly under code page 936. |
 | No page after double-click | Extract all files and check the architecture. Run the launcher in a terminal to see the error. Open the printed URL if needed. |
 | Port 8899 is occupied | Try a free port such as 8900. To stop a running instance for this configuration, use the same launcher with `--stop`. |
 | The console opens but the proxy test fails | Verify the listening address and HTTP/mixed port. For a failed TCP connection, check the proxy service, interface and firewall. If TCP works, check protocol, upstream route and target. |

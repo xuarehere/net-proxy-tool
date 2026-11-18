@@ -11,7 +11,7 @@ The console request runner accepts HTTP(S) probes. Run other application command
 ## Credentials and backups
 
 - Protect `config.json` and the adjacent `data/` directory with your account's filesystem permissions. The saved configuration can contain SSH login credentials. JSON API responses omit credential fields. `data/instance.json` includes the shutdown token.
-- Prefer SSH keys. The Windows control host uses OpenSSH key authentication. On a POSIX control host, password-based provisioning may install the control user's public key in the target account's `authorized_keys`. Verify the target host key independently before first contact.
+- Use the SSH identity configured for that node. For password authentication, verify the server fingerprint and trust the matching host and port in the control account’s OpenSSH known_hosts before testing. Each saved password belongs to its configured destination and account. The normal provisioning workflow leaves authorized_keys under operator control.
 - Back up a managed node's tool and shell settings before its first persistent switch. When running as root, the remote operation can affect system-wide tool configuration.
 - Share sanitized examples and the minimum diagnostic excerpt needed. Remove tokens, passwords, shutdown state, usernames and internal hostnames from screenshots and logs.
 
@@ -21,4 +21,4 @@ Use the repository's [Security page](https://github.com/xuarehere/net-proxy-tool
 
 ## 中文说明
 
-控制台可以以当前账号的权限执行命令。远程节点的开关可以修改目标工具或 shell 配置，root 账号还能修改系统级设置。控制台应由普通用户在回环地址运行。管理接口没有逐用户登录，能访问该回环端口的本机账号或程序都可以操作控制台。共享服务器应通过独立网络命名空间或虚拟机限制访问，只允许受信任的操作人员连接。从其他机器访问时使用 SSH 端口转发，本机端口仍需隔离。配置可能含 SSH 密码，`data/instance.json` 含停机令牌，均应限制读取权限。Windows 控制端使用 OpenSSH 密钥认证。报告漏洞时请使用私密渠道，附版本、平台以及使用临时凭据的最小复现步骤。
+控制台可以以当前账号的权限执行命令。远程节点的开关可以修改目标工具或 shell 配置，root 账号还能修改系统级设置。控制台应由普通用户在回环地址运行。管理接口没有逐用户登录，能访问该回环端口的本机账号或程序都可以操作控制台。共享服务器应通过独立网络命名空间或虚拟机限制访问，只允许受信任的操作人员连接。从其他机器访问时使用 SSH 端口转发，本机端口仍需隔离。配置可能含 SSH 密码，`data/instance.json` 含停机令牌，均应限制读取权限。密码认证使用节点单独配置的登录身份。先核对服务器指纹，并在运行控制台的账号下信任该 SSH 主机及端口。报告漏洞时请使用私密渠道，附版本、平台以及使用临时凭据的最小复现步骤。

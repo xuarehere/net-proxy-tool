@@ -78,6 +78,22 @@ class NodeRequestTests(unittest.TestCase):
         with patch.object(server, 'check_node_http', side_effect=changed):
             self.assertEqual(self.api('/api/node-test', {'node_id': 'node', 'gateway_id': 'first'})[0], 409)
 
+    def test_batch_checks_requested_target_and_never_audits_unexecuted_requests_as_passed(self):
+        failure = {'online': False, 'status_line': 'SSH failed', 'auth_ok': False,
+                   'stages': {'ssh': 'failed', 'http': 'not_reached'}}
+        url = 'https://batch-fixture.invalid/controlled'
+        with patch.object(server, 'check_node_http', return_value=failure.copy()) as probe:
+            status, result = self.api('/api/nodes/health-check-all', {'target_url': url})
+        self.assertEqual(status, 200)
+        self.assertTrue(result['completed'])
+        self.assertFalse(result['all_http_ok'])
+        self.assertEqual(result['both_paths_success_count'], 0)
+        self.assertEqual(probe.call_count, 2)
+        self.assertEqual(probe.call_args_list[0].kwargs['target_url'], url)
+        self.assertEqual(probe.call_args_list[1].args[2], url)
+        self.assertFalse(result['health_map']['node']['online'])
+        self.assertEqual(server.get_audit_logs()[0]['status'], 'failed')
+
     def test_remote_execution_stages_and_explicit_proxy_flags(self):
         target = {'id': 'remote', 'host': 'fixture.invalid', 'ssh_user': 'tester', 'port': 2222,
                   'container_name': 'fixture', 'access_mode': 'docker_host'}
@@ -88,7 +104,7 @@ class NodeRequestTests(unittest.TestCase):
             result = server.check_node_http(target, gateway, 'http://origin.invalid/ok')
             self.assertTrue(result['online'])
             self.assertEqual(result['stages'], dict(ssh='passed', docker_exec='passed', curl='passed',
-                                                   tcp='passed', http='passed'))
+                                                   tcp='passed', tls='skipped', http='passed'))
             command, script, _ = remote.call_args.args
             self.assertIn("printf 'NPT_SSH_READY", command[-1])
             self.assertIn('--proxy http://proxy.invalid:3128', script)
@@ -103,7 +119,7 @@ class NodeRequestTests(unittest.TestCase):
             self.assertEqual(result['stages']['http'], 'not_reached')
 
     @unittest.skipUnless(shutil.which('curl.exe' if os.name == 'nt' else 'curl'), 'requires curl')
-    def test_local_request_is_one_get_without_redirects_or_url_expansion(self):
+    def test_local_request_is_get_with_bounded_redirects_and_no_url_expansion(self):
         seen = []
         class Redirect(BaseHTTPRequestHandler):
             def do_GET(self):
@@ -125,7 +141,10 @@ class NodeRequestTests(unittest.TestCase):
             result = server.check_node_http({'host': '127.0.0.1'},
                                             target_url=f'http://127.0.0.1:{origin.server_port}/[1-2]')
         self.assertEqual(result['code'], 302, result)
-        self.assertEqual(seen, [('GET', '/[1-2]')])
+        self.assertEqual(result['first_status'], 302)
+        self.assertEqual(result['error_type'], 'redirect_limit')
+        self.assertEqual(seen[0], ('GET', '/[1-2]'))
+        self.assertEqual(seen[1:], [('GET', '/must-not-follow')] * 5)
 
     @unittest.skipUnless(shutil.which('curl.exe' if os.name == 'nt' else 'curl'), 'requires curl')
     def test_local_explicit_proxy_and_ordinary_request_take_distinct_paths(self):

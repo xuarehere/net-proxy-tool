@@ -1781,3 +1781,19 @@ body {
   .btn-primary { color: white; }
   .terminal-view, .code-delivery-card pre { color: #e2e8f0; }
 }
+
+.probe-targets { display: grid; grid-template-columns: minmax(9rem, .6fr) minmax(14rem, 2fr); align-items: end; gap: .8rem; margin: 1rem 0; }
+.probe-targets label { min-width: 0; color: var(--text-muted); }
+.probe-targets input, .probe-targets select { display: block; width: 100%; margin-top: .35rem; }
+.probe-targets .setup-url { max-width: none; margin: 0; }
+.row-target { display: grid; justify-content: end; gap: .3rem; margin-bottom: .4rem; }
+.row-target .form-select, .row-target .form-input { width: 11rem; font-size: .8rem; }
+.node-test-results { margin: 1rem 0; padding: 1rem; border: 1px solid var(--border-color); border-radius: var(--radius); }
+.node-test-results p { white-space: pre-line; overflow-wrap: anywhere; }
+#node-test-record { margin: .45rem 0 .8rem; color: var(--text-muted); }
+.probe-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.probe-checks section { background: var(--bg-surface); padding: .75rem; border-radius: var(--radius); }
+.probe-checks h4 { margin-bottom: .4rem; }
+@media (max-width: 640px) {
+  .probe-targets, .probe-checks { grid-template-columns: minmax(0, 1fr); }
+}

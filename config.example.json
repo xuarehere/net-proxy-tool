@@ -1,5 +1,5 @@
 {
-  "version": "1.4.1",
+  "version": "1.4.2",
   "active_gateway_id": "gw-default",
   "gateways": [
     {
@@ -48,7 +48,7 @@
       "bound_gateway_id": "gw-default",
       "tags": ["Docker", "6600", "沙箱隔离", "独立出海"],
       "is_proxy_enabled": false,
-      "description": "通过映射端口 6600 直连进入的独立 Docker 容器，初次密码建信后自动注入公钥免密"
+      "description": "通过映射端口 6600 直连进入的独立 Docker 容器，使用该节点配置的 SSH 身份"
     },
     {
       "id": "node-docker-sandbox",
@@ -93,9 +93,29 @@
   "no_proxy": "localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,*.local",
   "diagnostic_targets": {
     "Google": {
-      "url": "https://www.google.com",
+      "url": "https://www.google.com/",
       "desc": "全球互联网基础连通",
       "category": "基础服务"
+    },
+    "Claude": {
+      "url": "https://claude.ai/",
+      "desc": "Claude 网页入口",
+      "category": "AI/大模型"
+    },
+    "ChatGPT": {
+      "url": "https://chatgpt.com/",
+      "desc": "ChatGPT 网页入口",
+      "category": "AI/大模型"
+    },
+    "YouTube": {
+      "url": "https://www.youtube.com/",
+      "desc": "高吞吐流媒体/视音频数据",
+      "category": "多媒体"
+    },
+    "Gemini": {
+      "url": "https://gemini.google.com/",
+      "desc": "Gemini 网页入口",
+      "category": "AI/大模型"
     },
     "GitHub": {
       "url": "https://github.com",
@@ -121,11 +141,6 @@
       "url": "https://api.openai.com",
       "desc": "大语言模型 API 接口",
       "category": "AI/大模型"
-    },
-    "YouTube": {
-      "url": "https://www.youtube.com",
-      "desc": "高吞吐流媒体/视音频数据",
-      "category": "多媒体"
     }
   }
 }
