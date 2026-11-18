@@ -7,8 +7,9 @@ import stat
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
+from web import server
 from web.node_baseline import capture_node_baseline, verify_node_baseline, wrap_login_script
 from web.server import generate_provisioning_script
 
@@ -74,6 +75,44 @@ class LoginBaselineTests(unittest.TestCase):
                 self.assertTrue(verified['verified'], verified)
                 self.assertEqual(verified['verification_scope'], 'login_and_managed_files')
                 self.assertEqual(profile.read_bytes(), original)
+
+    def test_completed_legacy_restore_retries_verification_without_running_off_again(self):
+        profile = self.write('.profile', '# --- NET-PROXY-TOOL-START ---\n'
+                             'export HTTP_PROXY="http://old.invalid:3128"\n'
+                             '# --- NET-PROXY-TOOL-END ---\n')
+        original = profile.read_bytes()
+        target = dict(self.target, host='fixture.invalid', port=2222, ssh_user='tester',
+                      identity_version=1, lifecycle_version=1, access_mode='ssh', bound_gateway_id='g')
+        cfg = {'clients': [target], 'gateways': [dict(self.gateway, id='g')]}
+        mutations, verifications = [], []
+        verify = server.node_baseline.verify_node_baseline
+
+        def runner(target, script, timeout=20):
+            if '# Embedded into the script' in script:
+                mutations.append('off' if 'action=off' in script else 'on')
+            return self.runner(target, script, timeout)
+
+        def intermittent(*args, **kwargs):
+            verifications.append(1)
+            if len(verifications) == 1:
+                return {'verified': False, 'status': 'unknown', 'verification_scope': 'unavailable', 'checks': {}}
+            return verify(*args, **kwargs)
+
+        with patch.object(server, 'run_node_script', side_effect=runner), patch.object(server, 'save_config'):
+            result = server.apply_node_proxy(target, 'on', cfg)
+            self.assertEqual(result['returncode'], 0, result)
+            server.update_node_outcome(target, 'on', result)
+            with patch.object(server.node_baseline, 'verify_node_baseline', side_effect=intermittent):
+                first = server.apply_node_proxy(target, 'off', cfg)
+                server.update_node_outcome(target, 'off', first)
+                second = server.apply_node_proxy(target, 'off', cfg)
+                server.update_node_outcome(target, 'off', second)
+        self.assertEqual([first['returncode'], second['returncode']], [1, 0])
+        self.assertEqual(mutations, ['on', 'off'])
+        self.assertEqual(len(verifications), 2)
+        self.assertEqual(profile.read_bytes(), original)
+        self.assertEqual(target['managed_state'], 'disabled')
+        self.assertNotIn('_node_baseline', target)
 
     def test_permissions_created_directories_and_preexisting_state_survive_exactly(self):
         profile = self.write('.profile', '# baseline\n', 0o600)

@@ -90,6 +90,8 @@ def gateway_failure_flow(page, url):
                          "第 3 跳", "首跳 HTTP 302 → 未收到最终 HTTP 状态"):
             expect(result).to_contain_text(evidence)
         assert proxy.log == gateway_tls_fixture.EXPECTED_LOG
+        command = page.locator("#wizard-probe-command").text_content()
+        assert gateway_tls_fixture.START in command and str(proxy.server_port) in command and " -I" not in command
         assert page.locator("#card-step-2").evaluate("el => el.inert")
         before = load_config()
         with patch.object(server, "check_node_requests", return_value={"message": "只读请求已完成"}) as checked:

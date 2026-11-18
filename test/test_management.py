@@ -105,6 +105,13 @@ class ManagementTests(unittest.TestCase):
             self.assertEqual({id: observed[(action, id)] for id in ('ok', 'refused', 'exception')},
                              {'ok': 'success', 'refused': 'failed', 'exception': 'failed'})
 
+    def test_reading_legacy_identities_does_not_wait_for_dns(self):
+        with patch.object(socket, 'gethostbyname', side_effect=AssertionError('unexpected DNS lookup')), \
+             patch.object(socket, 'getaddrinfo', side_effect=AssertionError('unexpected DNS lookup')):
+            self.assertFalse(server.is_local_host('fixture.invalid'))
+            self.assertTrue(server.is_local_host('127.0.0.1'))
+            self.assertTrue(server.is_local_host('::1'))
+
     def test_legacy_fields_survive_updates_and_are_not_returned(self):
         self.gateway('gateway')
         cfg = load_config()

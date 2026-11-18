@@ -75,7 +75,9 @@ class NodeLifecycleTests(unittest.TestCase):
         cfg = load_config()
         saved = next(item for item in cfg['clients'] if item['id'] == node['id'])
         saved.update(is_proxy_enabled=True, managed_state='enabled',
-                     _node_baseline={'ok': True, 'managed': {'state': 'disabled'}, 'private_marker': 'baseline-private'})
+                     _node_baseline={'ok': True,
+                                     'execution_identity': {'uid': 1000, 'user': 'tester', 'home': '/home/tester', 'shell': '/bin/sh'},
+                                     'managed': {'state': 'disabled'}, 'private_marker': 'baseline-private'})
         save_config(cfg)
         return saved
 
@@ -195,13 +197,17 @@ class NodeLifecycleTests(unittest.TestCase):
 
     def test_delete_restored_node_rechecks_read_only_and_preserves_registration_on_failure(self):
         node = self.active(id='restored-delete')
+        observed = {'ok': True, 'execution_identity': node['_node_baseline']['execution_identity'],
+                    'managed': {'state': 'enabled'}}
         verified = {'verified': True, 'status': 'restored', 'verification_scope': 'login_and_managed_files',
                     'checks': {'identity': True, 'managed_files': True}, 'observation': {}}
         with patch.object(server.node_baseline, 'verify_node_baseline', return_value=verified) as verify, \
-                patch.object(server.node_baseline, 'capture_node_baseline') as capture, \
+                patch.object(server.node_baseline, 'capture_node_baseline', return_value=observed) as capture, \
                 patch.object(server, 'run_node_script', return_value=subprocess.CompletedProcess([], 0, '', '')) as execute:
             self.api('/api/node-switch', dict(self.selection(node), action='off'))
             restored = self.stored(node['id'])['_node_restored_baseline']
+            capture.assert_called_once()
+            capture.reset_mock()
             execute.reset_mock()
             verify.reset_mock()
             # A failed deletion and its retry must only inspect the already restored baseline.
@@ -336,6 +342,9 @@ class NodeLifecycleTests(unittest.TestCase):
                 target.pop('_node_baseline', None)
                 if action == 'off':
                     target['_node_baseline'] = copy.deepcopy(baseline)
+                current = copy.deepcopy(baseline)
+                if action == 'off':
+                    current['managed']['state'] = 'enabled'
                 events = []
                 def journal(saved):
                     events.append(('save', copy.deepcopy(saved['clients'][0])))
@@ -346,7 +355,7 @@ class NodeLifecycleTests(unittest.TestCase):
                     events.append(('execute', script))
                     return subprocess.CompletedProcess([], 0, '', '')
                 verification = dict(outcome('off', verified)['verification'], observation={'secret': 'not-public'})
-                with patch.object(server.node_baseline, 'capture_node_baseline', return_value=copy.deepcopy(baseline)), \
+                with patch.object(server.node_baseline, 'capture_node_baseline', return_value=current), \
                         patch.object(server.node_baseline, 'inspect_node_state', return_value={
                             'ok': True, 'execution_identity': identity, 'login': matching_login(),
                             'managed': {'state': 'enabled' if verified else 'unknown', 'owner_node_id': node['id']}}), \
@@ -411,15 +420,95 @@ class NodeLifecycleTests(unittest.TestCase):
                 self.assertNotIn('_node_baseline', cfg['clients'][0])
                 execute.assert_not_called()
 
+    def test_off_script_success_then_temporary_verification_failure_retries_without_rewriting(self):
+        node = self.active(id='off-awaiting-verification')
+        identity = {'uid': 1000, 'user': 'tester', 'home': '/home/tester', 'shell': '/bin/sh'}
+        baseline = {'ok': True, 'execution_identity': identity, 'managed': {'state': 'disabled'}}
+        cfg = load_config()
+        cfg['clients'][0]['_node_baseline'] = copy.deepcopy(baseline)
+        save_config(cfg)
+        observations = [{'ok': True, 'execution_identity': identity, 'managed': {'state': state}}
+                        for state in ('enabled', 'disabled')]
+        verifications = [{'verified': False, 'status': 'unknown', 'observation': {}},
+                         {'verified': True, 'status': 'restored', 'verification_scope': 'login_and_managed_files',
+                          'checks': {'managed_files': True, 'identity': True}, 'observation': {}}]
+        with patch.object(server.node_baseline, 'capture_node_baseline', side_effect=observations), \
+                patch.object(server.node_baseline, 'verify_node_baseline', side_effect=verifications) as verify, \
+                patch.object(server, 'run_node_script', return_value=subprocess.CompletedProcess([], 0, '', '')) as execute:
+            first = self.api('/api/node-switch', dict(self.selection(node), action='off'), 502)
+            self.assertEqual(first['managed_state'], 'unknown')
+            current = self.stored(node['id'])
+            self.assertEqual(current['pending_action'], 'off')
+            self.assertEqual(current['_node_baseline'], baseline)
+            second = self.api('/api/node-switch', dict(self.selection(current), action='off'))
+            self.assertEqual(second['managed_state'], 'disabled')
+            self.assertEqual(execute.call_count, 1)
+            self.assertEqual(verify.call_count, 2)
+        restored = self.stored(node['id'])
+        self.assertNotIn('_node_baseline', restored)
+        self.assertNotIn('pending_action', restored)
+        self.assertEqual(restored['_node_restored_baseline'], baseline)
+
+    def test_unknown_managed_observation_rejects_writes_with_or_without_saved_baseline(self):
+        self.add(id='unknown-current')
+        identity = {'uid': 1000, 'user': 'tester', 'home': '/home/tester', 'shell': '/bin/sh'}
+        baseline = {'ok': True, 'execution_identity': identity, 'managed': {'state': 'disabled'}}
+        for saved_baseline in (False, True):
+            for action in ('on', 'off'):
+                for observation in ({'ok': True, 'managed': {'state': 'unknown'}},
+                                    {'ok': True}, {'ok': False, 'managed': {'state': 'disabled'}}):
+                    with self.subTest(saved_baseline=saved_baseline, action=action, observation=observation):
+                        cfg = load_config()
+                        target = cfg['clients'][0]
+                        if saved_baseline:
+                            target['_node_baseline'] = copy.deepcopy(baseline)
+                            target['pending_action'] = 'off'
+                        current = dict(observation, execution_identity=identity)
+                        with patch.object(server.node_baseline, 'capture_node_baseline', return_value=current), \
+                                patch.object(server.node_baseline, 'verify_node_baseline') as verify, \
+                                patch.object(server, 'run_node_script') as execute:
+                            result = server.apply_node_proxy(target, action, cfg)
+                        self.assertNotEqual(result['returncode'], 0)
+                        self.assertEqual(result['managed_state'], 'unknown')
+                        execute.assert_not_called()
+                        verify.assert_not_called()
+                        if saved_baseline:
+                            self.assertEqual(target['_node_baseline'], baseline)
+                        else:
+                            self.assertNotIn('_node_baseline', target)
+
+    def test_disabled_observation_with_unverified_baseline_retries_only_read_only(self):
+        node = self.active(id='disabled-unverified')
+        identity = {'uid': 1000, 'user': 'tester', 'home': '/home/tester', 'shell': '/bin/sh'}
+        baseline = {'ok': True, 'execution_identity': identity, 'managed': {'state': 'disabled'}}
+        cfg = load_config()
+        cfg['clients'][0].update(_node_baseline=copy.deepcopy(baseline), pending_action='off')
+        save_config(cfg)
+        observed = {'ok': True, 'execution_identity': identity, 'managed': {'state': 'disabled'}}
+        with patch.object(server.node_baseline, 'capture_node_baseline', return_value=observed), \
+                patch.object(server.node_baseline, 'verify_node_baseline') as verify, \
+                patch.object(server, 'run_node_script') as execute:
+            for status in ('changed', 'unknown', 'changed'):
+                verify.return_value = {'verified': False, 'status': status, 'observation': {}}
+                current = self.stored(node['id'])
+                response = self.api('/api/node-switch', dict(self.selection(current), action='off'), 502)
+                self.assertEqual(response['managed_state'], 'unknown')
+                self.assertEqual(self.stored(node['id'])['_node_baseline'], baseline)
+                self.assertTrue(server.needs_node_restoration(self.stored(node['id'])))
+                execute.assert_not_called()
+            self.assertEqual(verify.call_count, 3)
+
     def test_repeated_off_verifies_saved_restored_baseline_without_rewriting(self):
         node = self.active(id='repeat-off')
+        observed = {'ok': True, 'execution_identity': node['_node_baseline']['execution_identity'],
+                    'managed': {'state': 'enabled'}}
         observed_login = matching_login()
         for value in observed_login['proxy_variables'].values():
             value['fingerprint'] = 'fixture-login-fingerprint'
         verification = {'verified': True, 'status': 'restored', 'verification_scope': 'login_and_managed_files',
                         'checks': {'identity': True, 'managed_files': True}, 'observation': {
                             'login': observed_login}}
-        with patch.object(server.node_baseline, 'capture_node_baseline') as capture, \
+        with patch.object(server.node_baseline, 'capture_node_baseline', return_value=observed) as capture, \
                 patch.object(server.node_baseline, 'verify_node_baseline', return_value=verification) as verify, \
                 patch.object(server, 'run_node_script', return_value=subprocess.CompletedProcess([], 0, '', '')) as execute:
             for _ in range(2):
@@ -434,7 +523,7 @@ class NodeLifecycleTests(unittest.TestCase):
                 self.assertNotIn('fixture-login-fingerprint', json.dumps(result))
             self.assertEqual(execute.call_count, 1)
             self.assertEqual(verify.call_count, 2)
-            capture.assert_not_called()
+            capture.assert_called_once()
         saved = self.stored(node['id'])
         self.assertNotIn('_node_baseline', saved)
         self.assertIn('_node_restored_baseline', saved)

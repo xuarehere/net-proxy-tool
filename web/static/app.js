@@ -294,6 +294,14 @@ document.addEventListener("DOMContentLoaded", () => {
     return "'" + value.replaceAll("'", windows ? "''" : "'\\''") + "'";
   }
 
+  function gatewayGetCommand(gateway, target) {
+    const windows = navigator.platform.startsWith("Win");
+    const quote = value => quoteTarget(value, windows);
+    return (windows ? "curl.exe" : "curl") + " --disable --noproxy " + (windows ? "' '" : "''") +
+      " --proxy " + quote(gatewayAddress(gateway)) + " --location --max-redirs 5 --max-time 15" +
+      " --proto-redir " + quote(target.toLowerCase().startsWith("https:") ? "=https" : "=http,https") + " --url " + quote(target);
+  }
+
   function probeConclusion(result) {
     if (result.http_ok || result.online) return "代理请求成功 · 最终 HTTP " + result.code;
     const phase = {validation: "目标地址校验", proxy_tcp: "网关 TCP 连接", proxy_tunnel: "代理 CONNECT",
@@ -448,12 +456,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (revision !== setupRevision) return;
       renderProbe(setupResult, data);
       if (data.request_url) {
-        const windows = navigator.platform.startsWith("Win");
-        const quote = value => quoteTarget(value, windows);
-        setupCommand.textContent = (windows ? "curl.exe" : "curl") +
-          " --noproxy " + (windows ? "' '" : "''") + " --proxy " + quote(gatewayAddress(gateway)) +
-          " --location --max-redirs 5 --proto-redir " + quote(target.toLowerCase().startsWith("https:") ? "=https" : "=http,https") +
-          " --url " + quote(data.request_url || target);
+        setupCommand.textContent = gatewayGetCommand(gateway, data.request_url);
         setupCommand.hidden = false;
         setupCompare.hidden = !setupId || setupDirty;
       }
@@ -611,8 +614,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const env = verification?.restored_environment;
     if (!env?.observed) return "";
     const gateway = env.matched_gateway;
-    if (gateway) return `原登录环境仍有代理 · ${formatPeer(gateway.host, gateway.port)}（与已知网关吻合）`;
-    return env.proxy_present ? "原登录环境仍有代理（其他来源，地址未回显）" : "独立登录环境未检测到代理变量（不代表所有应用直连）";
+    const context = verification.verified && verification.verification_scope === "login_and_managed_files"
+      ? "原登录环境" : "当前独立登录环境";
+    if (gateway) return `${context}仍有代理 · ${formatPeer(gateway.host, gateway.port)}（与已知网关吻合）`;
+    return env.proxy_present ? `${context}仍有代理（其他来源，地址未回显）` : `${context}未检测到代理变量（不代表所有应用直连）`;
   }
 
   function nodeContext(result) {
@@ -734,7 +739,8 @@ document.addEventListener("DOMContentLoaded", () => {
       if (revision !== wizardProbeRevision) return;
       renderProbe(step1Result, data);
       wizardProbeActions.hidden = false;
-      const bound = appConfig.clients.filter(client => client.bound_gateway_id === gateway.id);
+      document.getElementById("wizard-probe-command").textContent = gatewayGetCommand(gateway, target);
+      const bound = (appConfig.clients || []).filter(client => client.bound_gateway_id === gateway.id);
       readOnlyNode.replaceChildren(...bound.map(client => new Option(client.name, client.id)));
       if (!bound.length) readOnlyNode.add(new Option("暂无已绑定节点", ""));
       readOnlyNode.disabled = readOnlyTest.disabled = !bound.length;
@@ -2203,6 +2209,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 绑定开发者手册中的复制按钮
   attachCopyButtons(document.getElementById("tab-handbook"));
+  attachCopyButtons(wizardProbeActions);
 
   function escapeHtml(str) {
     if (!str) return "";

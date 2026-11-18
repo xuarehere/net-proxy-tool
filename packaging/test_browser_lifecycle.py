@@ -41,6 +41,20 @@ def run():
         expect(table).to_contain_text('未核验')
         expect(table).to_contain_text('192.0.2.183:7890')
 
+        # Only a complete verified login baseline may be called the original environment.
+        restored_row = table.locator('tr', has=page.locator('[data-action="delete-client"][data-id="node-disabled"]'))
+        for verified, scope, label in ((False, 'login_and_managed_files', '当前独立登录环境'),
+                                      (True, 'managed_files_only', '当前独立登录环境'),
+                                      (True, 'login_and_managed_files', '原登录环境')):
+            latest = load_config()
+            latest['clients'][1]['verification'].update(verified=verified, verification_scope=scope)
+            save_config(latest)
+            page.reload()
+            page.locator('[data-tab="tab-topology"]').click()
+            expect(restored_row.locator('.restoration-note')).to_contain_text(label)
+            if label != '原登录环境':
+                expect(restored_row.locator('.restoration-note')).not_to_contain_text('原登录环境')
+
         def dispatch(target, action, config):
             mutations.append((target['id'], action))
             return {'returncode': 0, 'managed_state': 'enabled' if action == 'on' else 'disabled',

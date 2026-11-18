@@ -146,7 +146,7 @@ class SSHAuthTests(unittest.TestCase):
                 self.assertIn('NPT_SSH_READY', execute.call_args.kwargs['remote_command'])
                 if mode == 'docker_host':
                     self.assertIn('docker exec -i -u 0 worker sh', execute.call_args.kwargs['remote_command'])
-        baseline = {'ok': True, 'execution_identity': {'user': 'tester'}}
+        baseline = {'ok': True, 'execution_identity': {'user': 'tester'}, 'managed': {'state': 'disabled'}}
         with patch.object(server, 'run_node_script', return_value=subprocess.CompletedProcess([], 0, '', '')) as execute, \
                 patch.object(server.node_baseline, 'capture_node_baseline', return_value=baseline), \
                 patch.object(server.node_baseline, 'inspect_node_state', return_value=dict(baseline,

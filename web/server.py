@@ -99,20 +99,25 @@ def get_audit_logs(limit=60):
 
 
 def is_local_host(host: str) -> bool:
-    """动态检查目标主机是否为当前服务器本机 (跨平台兼容 x86/ARM/Win/Mac/Linux)"""
+    """Check local execution addresses without resolving DNS on a configuration read."""
     if not host:
         return False
-    host_clean = host.strip().lower()
-    if host_clean in ("127.0.0.1", "localhost", "::1", "0.0.0.0"):
+    name = host.strip().lower()
+    if name in ("localhost", socket.gethostname().lower()):
         return True
     try:
-        local_ips = {"127.0.0.1", "localhost", "::1"}
-        hostname = socket.gethostname()
-        local_ips.add(socket.gethostbyname(hostname).lower())
-        for info in socket.getaddrinfo(hostname, None):
-            local_ips.add(info[4][0].lower())
-        return host_clean in local_ips
-    except Exception:
+        address = ipaddress.ip_address(name)
+    except ValueError:
+        return False
+    if address.is_loopback or address.is_unspecified:
+        return True
+    family = socket.AF_INET6 if address.version == 6 else socket.AF_INET
+    try:
+        # Binding a UDP socket checks address ownership locally without sending packets.
+        with socket.socket(family, socket.SOCK_DGRAM) as endpoint:
+            endpoint.bind((str(address), 0))
+        return True
+    except OSError:
         return False
 
 
@@ -686,17 +691,31 @@ def apply_node_proxy(target, action, cfg):
         if target.get("applied_identity") and tuple(target["applied_identity"]) != node_ssh_identity(target):
             return dict(result, error="已保存的托管执行身份与当前目标不一致；未执行写入，请先恢复原身份。")
         baseline = target.get("_node_baseline")
-        if baseline and baseline.get("execution_identity"):
+        restored = None
+        known_states = ("enabled", "disabled", "partial", "conflict")
+        if baseline:
+            if not baseline.get("execution_identity"):
+                return dict(result, error="已保存的恢复基线缺少执行身份；未执行配置写入，登记保留。")
             current = node_baseline.capture_node_baseline(target, run_node_script, gateway)
             if not current.get("ok") or current.get("execution_identity") != baseline["execution_identity"]:
                 return dict(result, error="实际登录账号、UID、HOME 或 shell 已变化或无法核验；未执行配置写入，原基线保留。")
-        restored = action == "off" and not baseline and target.get("_node_restored_baseline")
+            current_state = current.get("managed", {}).get("state")
+            if current_state not in known_states:
+                return dict(result, error="无法确认当前托管状态；未执行配置写入，原基线保留。")
+            if action == "off" and current_state == "disabled":
+                # The prior off may have committed before its verification failed.
+                # Re-check the preserved evidence instead of re-running a legacy guard.
+                restored = baseline
+        if action == "off" and not baseline:
+            restored = target.get("_node_restored_baseline")
         if restored:
             baseline = restored
         if not baseline:
             baseline = node_baseline.capture_node_baseline(target, run_node_script, gateway)
             if not baseline.get("ok"):
                 return dict(result, error="无法读取节点基线；尚未执行配置写入。")
+            if baseline.get("managed", {}).get("state") not in known_states:
+                return dict(result, error="节点托管状态未知；尚未执行配置写入，登记保留。")
             if action == "off" and not (baseline.get("managed", {}).get("state") in ("enabled", "partial", "conflict")
                                       and baseline.get("managed", {}).get("restoration_manifest")):
                 return dict(result, error="缺少启用前基线或可核验的旧快照；未写入配置，无法宣称已恢复，登记保留。")

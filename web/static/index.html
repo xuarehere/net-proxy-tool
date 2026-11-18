@@ -139,6 +139,8 @@
             </div>
             <div id="wizard-probe-actions" class="probe-actions" hidden>
               <button id="wizard-compare" type="button" class="btn btn-secondary">用系统 curl 复测同一 GET</button>
+              <details><summary>终端 GET 命令</summary><code id="wizard-probe-command"></code>
+                <button class="btn-copy" type="button" data-target="wizard-probe-command">复制命令</button></details>
               <label>已绑定此网关的节点<select id="wizard-readonly-node" class="form-select"></select></label>
               <button id="wizard-readonly-test" type="button" class="btn btn-secondary">从节点只读诊断</button>
               <p id="wizard-readonly-output" role="status"></p>

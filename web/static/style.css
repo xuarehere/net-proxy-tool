@@ -1767,6 +1767,7 @@ body {
 #step-1-result:has(.probe-evidence) { display: block; }
 .probe-actions { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; margin-top: .75rem; }
 .probe-actions label { display: grid; gap: .25rem; }
+.probe-actions details { max-width: 100%; overflow-wrap: anywhere; }
 .probe-actions p { flex-basis: 100%; margin: 0; }
 [hidden] { display: none !important; }
 
