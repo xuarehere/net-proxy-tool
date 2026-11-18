@@ -54,7 +54,7 @@ def public_home(browser, url, screenshot):
     for theme, width in [("light", 1280), ("dark", 1280), ("light", 390), ("dark", 390)]:
         page = browser.new_page(color_scheme=theme, viewport={"width": width, "height": 840})
         page.goto(url)
-        expect(page.locator("#setup-save")).to_be_visible()
+        expect(page.locator("#setup-save")).to_be_enabled()
         assert page.evaluate("document.documentElement.scrollWidth") <= width
         if screenshot and theme == "dark" and width == 1280:
             page.screenshot(path=str(screenshot))
@@ -92,14 +92,29 @@ def run(screenshot=None):
         def form(id):
             return page.locator("#" + id)
 
+        def defer_readback():
+            page.route("**/api/config?*", hold_config)
+
+        def release_readback():
+            expect(form("setup-url")).to_be_disabled()
+            expect(form("setup-test")).to_be_disabled()
+            expect(form("setup-save")).to_be_disabled()
+            expect(form("setup-select")).to_be_disabled()
+            assert len(pending_config) == 1
+            pending_config.pop().continue_()
+            page.unroute("**/api/config?*", hold_config)
+
         for i, gateway in enumerate(gateways):
             if i:
                 form("setup-select").select_option("")
             form("setup-name").fill("gateway-" + str(i))
             form("setup-host").fill("127.0.0.1")
             form("setup-port").fill(str(gateway.server_port))
-            with page.expect_response(lambda r: r.url.endswith("/api/gateways/add")) as saved:
-                form("setup-save").click()
+            defer_readback()
+            with page.expect_request("**/api/config?*"):
+                with page.expect_response(lambda r: r.url.endswith("/api/gateways/add")) as saved:
+                    form("setup-save").click()
+            release_readback()
             gateway.gateway_id = saved.value.json()["gateway"]["id"]
             expect(form("setup-select")).to_have_value(gateway.gateway_id)
             form("setup-url").fill(START)
@@ -108,7 +123,10 @@ def run(screenshot=None):
             expect(form("setup-result")).to_contain_text(FINAL)
             expect(form("setup-command")).to_contain_text(START)
             assert gateway.requests == [START, FINAL]
-        form("setup-default").click()
+        defer_readback()
+        with page.expect_request("**/api/config?*"):
+            form("setup-default").click()
+        release_readback()
         expect(form("setup-default")).to_be_hidden()
         page.reload()
         expect(form("setup-select")).to_have_value(gateways[1].gateway_id)

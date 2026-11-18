@@ -177,8 +177,10 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!res.ok) throw new Error("加载配置失败: " + res.status);
       appConfig = await res.json();
       renderAll();
-      setupControls.disabled = false;
+      setupReady = true;
+      setupControls.disabled = setupBusy;
       setupReload.hidden = true;
+      return true;
     } catch (err) {
       if (setupControls.disabled) {
         setupResult.textContent = err.message;
@@ -187,6 +189,7 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error(err);
       globalStatusText.textContent = "配置加载失败";
       globalStatusPill.querySelector(".status-indicator-dot").className = "status-indicator-dot offline";
+      return false;
     }
   }
 
@@ -219,6 +222,8 @@ document.addEventListener("DOMContentLoaded", () => {
   let setupId = null;
   let setupRevision = 0;
   let setupDirty = false;
+  let setupReady = false;
+  let setupBusy = false;
 
   function gatewayAddress(gateway) {
     const host = gateway.host.includes(":") ? "[" + gateway.host + "]" : gateway.host;
@@ -271,34 +276,48 @@ document.addEventListener("DOMContentLoaded", () => {
     clearSetupResult();
   });
 
+  function beginSetupSave(message) {
+    clearSetupResult();
+    setupBusy = true;
+    setupControls.disabled = true;
+    setupResult.textContent = message;
+  }
+
+  function finishSetupSave() {
+    setupBusy = false;
+    setupControls.disabled = !setupReady;
+  }
+
   setupDefault.addEventListener("click", async () => {
-    setupDefault.disabled = true;
+    beginSetupSave("正在切换默认网关…");
     try {
       await postJson("/api/set-active-gateway", {gateway_id: setupId});
-      await loadConfig();
+      setupReady = false;
+      if (!await loadConfig()) return;
       setupResult.textContent = "已设为默认网关。";
     } catch (error) {
       setupResult.textContent = error.message;
     } finally {
-      setupDefault.disabled = false;
+      finishSetupSave();
     }
   });
 
   setupForm.addEventListener("submit", async event => {
     event.preventDefault();
-    setupSave.disabled = true;
+    beginSetupSave("正在保存并读取网关配置…");
     try {
       const payload = setupPayload();
       if (setupId) payload.id = setupId;
       const data = await postJson(setupId ? "/api/gateways/update" : "/api/gateways/add", payload);
       setupId = data.gateway.id;
       setupDirty = false;
-      await loadConfig();
+      setupReady = false;
+      if (!await loadConfig()) return;
       setupResult.textContent = "已保存网关。点击“发送代理请求”以验证目标站点。";
     } catch (error) {
       setupResult.textContent = error.message;
     } finally {
-      setupSave.disabled = false;
+      finishSetupSave();
     }
   });
 
