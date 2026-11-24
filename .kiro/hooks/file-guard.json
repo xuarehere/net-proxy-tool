@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "File guard",
+      "trigger": "PreToolUse",
+      "description": "Blocks file tools that read or change the root config.json (SSH passwords) and writes that would add a third-party import to runtime code (spec: dev-guardrails).",
+      "matcher": "read|write|append|replace|delete_file|deleteFile|relocate|edit_file|create_file",
+      "action": {
+        "type": "command",
+        "command": "python -X utf8 tools/kiro/guard_shell.py",
+        "timeout": 30
+      }
+    }
+  ]
+}

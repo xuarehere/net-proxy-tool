@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Session brief after compaction",
+      "trigger": "PostCompact",
+      "description": "After the conversation is compacted, restates the branch, uncommitted work, version consistency and standing project rules (spec: dev-guardrails).",
+      "action": {
+        "type": "command",
+        "command": "python -X utf8 tools/kiro/session_brief.py",
+        "timeout": 30
+      }
+    }
+  ]
+}

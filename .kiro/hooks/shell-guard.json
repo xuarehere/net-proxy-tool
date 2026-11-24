@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Shell guard",
+      "trigger": "PreToolUse",
+      "description": "Blocks commands that print git remote URLs or tokens, force pushes, reads of the root config.json, and commits or pushes that contain credentials or private field data (spec: dev-guardrails).",
+      "matcher": "shell|execute_pwsh|execute_bash|execute_cmd|executePwsh|executeBash|control_pwsh_process|run_with_proxy",
+      "action": {
+        "type": "command",
+        "command": "python -X utf8 tools/kiro/guard_shell.py",
+        "timeout": 60
+      }
+    }
+  ]
+}

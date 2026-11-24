@@ -1,0 +1,52 @@
+# Example Kiro permission rules for working on net-proxy-tool.
+#
+# Kiro does not read permission rules from the repository. Copy the rules you
+# want into one of these files:
+#   - every workspace:  ~/.kiro/settings/permissions.yaml
+#   - this workspace:   ~/.kiro/workspace-roots/<hash>/permissions.yaml
+#     (choose "Always allow/deny" -> "This workspace" once in Kiro to create it)
+#
+# Format: https://kiro.dev/docs/permissions/  ("match" takes glob patterns;
+# for shell rules "*" matches any sequence of characters). The strictest
+# effect wins: deny > ask > allow.
+rules:
+  # Read-only inspection that runs constantly while developing.
+  - capability: shell
+    match:
+      - "git status*"
+      - "git log*"
+      - "git diff*"
+      - "git show*"
+      - "git branch*"
+      - "Get-Content *"
+      - "Get-ChildItem *"
+      - "python -X utf8 -m unittest*"
+      - "python -X utf8 tools/kiro/*"
+    effect: allow
+
+  # Commands that print remote URLs (which may embed a token) or rewrite
+  # published history. The project's shell-guard hook blocks them as well.
+  - capability: shell
+    match:
+      - "git remote -v*"
+      - "git remote --verbose*"
+      - "git remote get-url*"
+      - "git config -l*"
+      - "git config --list*"
+      - "git push --force*"
+      - "git push -f*"
+    effect: deny
+
+  # Deletions always need a person.
+  - capability: shell
+    match:
+      - "Remove-Item *"
+      - "del *"
+      - "rm *"
+    effect: ask
+
+  # The maintainer's console configuration stores SSH passwords.
+  - capability: fs_read
+    match:
+      - "config.json"
+    effect: deny
