@@ -280,7 +280,8 @@ class GatewayIdentityTests(unittest.TestCase):
                 def add(payload):
                     conn = http.client.HTTPConnection(*web.server_address, timeout=3)
                     try:
-                        conn.request("POST", "/api/gateways/add", json.dumps(payload))
+                        conn.request("POST", "/api/gateways/add", json.dumps(payload),
+                                     {"Content-Type": "application/json"})
                         response = conn.getresponse()
                         return response.status, json.loads(response.read())
                     finally:
