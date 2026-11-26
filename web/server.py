@@ -305,6 +305,23 @@ def allowed_host_names():
     return names
 
 
+def host_addresses():
+    """The addresses of this machine, with the loopback ones marked.
+
+    An operator needs an address a remote node can reach, so the console can
+    report which of its own addresses are usable for a gateway.
+    """
+    entries = []
+    for name in sorted(console_host_names()):
+        try:
+            ipaddress.ip_address(name)
+        except ValueError:
+            continue
+        entries.append({"address": name, "loopback": is_loopback_client(name)})
+    entries.append({"name": socket.gethostname().lower(), "loopback": False})
+    return entries
+
+
 def resolve_access_token(bind_host):
     """Return the access token for this console and whether one is required."""
     configured = (os.environ.get(ACCESS_TOKEN_ENV) or "").strip()
@@ -1351,6 +1368,11 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/audit-logs":
             self.send_json({"success": True, "logs": get_audit_logs(60)})
+            return
+
+        if path == "/api/host-addresses":
+            addresses = host_addresses()
+            self.send_json({"addresses": addresses, "count": len(addresses)})
             return
 
         if path == "/api/status":

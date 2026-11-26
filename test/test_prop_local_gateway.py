@@ -4,6 +4,7 @@ P10: the gateway answers every request head without failing, refuses a request
 that is not a proxy request, and refuses a destination port that is not allowed.
 """
 import socket
+import time
 import unittest
 
 from prop_support import given, st
@@ -42,6 +43,15 @@ class LocalGatewayProperties(unittest.TestCase):
             return b""
         return answer
 
+    def wait_for_record(self, outcome, attempts=100):
+        """The record is written after the answer, so wait for it."""
+        for _ in range(attempts):
+            records = self.gateway.records_list()
+            if any(record["outcome"] == outcome for record in records):
+                return records
+            time.sleep(0.02)
+        return self.gateway.records_list()
+
     @given(head=HEADS)
     def test_p10_every_request_is_answered_and_the_forbidden_ones_are_refused(self, head):
         answer = self.ask(head)
@@ -53,7 +63,7 @@ class LocalGatewayProperties(unittest.TestCase):
     def test_p10_a_forbidden_port_is_refused_without_a_connection(self, target):
         answer = self.ask("GET {} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".format(target))
         self.assertIn(b" 403 ", answer.split(b"\r\n", 1)[0])
-        records = self.gateway.records_list()
+        records = self.wait_for_record("forbidden")
         self.assertTrue(any(record["outcome"] == "forbidden" for record in records))
 
 

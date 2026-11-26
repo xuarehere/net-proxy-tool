@@ -9,7 +9,7 @@
   --border-focus: #38bdf8;
   --text-main: #f8fafc;
   --text-muted: #94a3b8;
-  --text-dim: #64748b;
+  --text-dim: #7f92a8;
   --primary: #38bdf8;
   --primary-hover: #0ea5e9;
   --primary-glow: rgba(56, 189, 248, 0.25);
@@ -1179,10 +1179,11 @@ body {
 
 .action-dropdown-menu {
   display: none;
-  position: absolute;
-  right: 0;
-  top: 100%;
-  margin-top: 4px;
+  /* Fixed, so that no table cell or card can cut the menu off. The script
+     places it next to its button and keeps it inside the viewport. */
+  position: fixed;
+  left: 0;
+  top: 0;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 8px;

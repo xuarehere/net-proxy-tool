@@ -2,6 +2,7 @@
 import http.client
 import socket
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -72,8 +73,17 @@ class LocalGatewayTests(unittest.TestCase):
         request = ("GET http://127.0.0.1:9/ HTTP/1.1\r\nHost: 127.0.0.1:9\r\n\r\n").encode()
         answer = self.raw(request)
         self.assertIn(b"403", answer.split(b"\r\n", 1)[0])
-        records = self.gateway.records_list()
+        records = self.wait_for_record("forbidden")
         self.assertTrue(any(record["outcome"] == "forbidden" for record in records))
+
+    def wait_for_record(self, outcome, attempts=100):
+        """The record is written after the answer, so wait for it."""
+        for _ in range(attempts):
+            records = self.gateway.records_list()
+            if any(record["outcome"] == outcome for record in records):
+                return records
+            time.sleep(0.02)
+        return self.gateway.records_list()
 
     def test_a_request_that_is_not_a_proxy_request_is_refused(self):
         answer = self.raw(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")

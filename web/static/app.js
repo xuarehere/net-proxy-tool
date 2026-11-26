@@ -238,7 +238,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   let nodeTargetRevision = 0;
-  let activeNodeProbe = 0;
+  // Each node keeps its own test number and its own result, so two nodes can be
+  // tested at the same time without one result replacing the other.
+  const nodeProbeSequences = new Map();
+  const nodeProbeResults = new Map();
   nodeTargetUrl.addEventListener("input", () => {
     nodeTargetRevision++;
     document.getElementById("node-test-results").hidden = true;
@@ -640,6 +643,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function showNodeResult(client, result) {
+    // Remember the result for this node, so a redraw keeps it and another
+    // node's result never replaces it.
+    nodeProbeResults.set(client.id, result);
     document.getElementById("node-test-heading").textContent = client.name + " · 外网测试";
     document.getElementById("node-test-record").textContent = nodeContext(result);
     const cards = document.getElementById("node-test-checks");
@@ -1038,6 +1044,36 @@ document.addEventListener("DOMContentLoaded", () => {
     return client.os_type === "windows" && client.access_mode === "local";
   }
 
+  function isLoopbackHost(host) {
+    const name = String(host || "").trim().toLowerCase();
+    if (!name) return false;
+    if (name === "localhost") return true;
+    if (name === "::1" || name === "0:0:0:0:0:0:0:1") return true;
+    if (name.startsWith("::ffff:")) return isLoopbackHost(name.slice(7));
+    return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(name);
+  }
+
+  function positionDropdownMenu(wrap) {
+    const menu = wrap && wrap.querySelector(".action-dropdown-menu");
+    const toggle = wrap && wrap.querySelector(".btn-dropdown-toggle");
+    if (!menu || !toggle) return;
+    const rect = toggle.getBoundingClientRect();
+    const width = menu.offsetWidth || 140;
+    const height = menu.offsetHeight || 160;
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    const top = Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - height - 8));
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
+  }
+
+  function repositionOpenDropdown() {
+    const wrap = document.querySelector(".action-dropdown-wrap.active");
+    if (wrap) positionDropdownMenu(wrap);
+  }
+
+  window.addEventListener("scroll", repositionOpenDropdown, true);
+  window.addEventListener("resize", repositionOpenDropdown);
+
   function openGatewayRequest(gatewayId, target) {
     switchTab("tab-sandbox");
     sbGwOverrideSelect.value = gatewayId;
@@ -1315,6 +1351,14 @@ document.addEventListener("DOMContentLoaded", () => {
       `;
       bindRowTarget(tr, c);
       topClientsTbody.appendChild(tr);
+      const stored = nodeProbeResults.get(c.id);
+      if (stored) {
+        const pill = tr.querySelector(".rtt-pill");
+        if (pill) {
+          pill.textContent = stored.success ? "HTTP 成功" : "查看结果";
+          pill.style.color = stored.success ? "var(--success)" : "var(--warning)";
+        }
+      }
     });
 
     // 绑定下拉操作菜单切换
@@ -1325,8 +1369,17 @@ document.addEventListener("DOMContentLoaded", () => {
         document.querySelectorAll(".action-dropdown-wrap.active").forEach(w => {
           if (w !== wrap) w.classList.remove("active");
         });
-        if (wrap) wrap.classList.toggle("active");
+        if (wrap) {
+          const opening = !wrap.classList.contains("active");
+          wrap.classList.toggle("active");
+          if (opening) positionDropdownMenu(wrap);
+        }
       });
+    });
+
+    // 悬停打开的菜单也要跟随按钮，否则会被表格裁掉
+    topClientsTbody.querySelectorAll(".action-dropdown-wrap").forEach(wrap => {
+      wrap.addEventListener("mouseenter", () => positionDropdownMenu(wrap));
     });
 
     // 绑定表格操作按钮
@@ -1337,6 +1390,13 @@ document.addEventListener("DOMContentLoaded", () => {
         const client = appConfig.clients.find(item => item.id === cid);
         if (isWindowsWorkstation(client)) { openGatewayRequest(client.bound_gateway_id || activeGateway?.id || ""); return; }
         if (actionType === "off" && !confirm(`恢复 ${client.name} 的启用前基线？原有代理可能继续生效。`)) return;
+        if (actionType === "on" && client.access_mode !== "local") {
+          const boundGw = (appConfig.gateways || []).find(g => g.id === client.bound_gateway_id);
+          if (boundGw && isLoopbackHost(boundGw.host)) {
+            const ok = confirm(`节点【${client.name}】绑定的网关 ${boundGw.host}:${boundGw.port} 是本机回环地址，远程节点无法访问它。\n仍要开启吗？`);
+            if (!ok) return;
+          }
+        }
         btn.disabled = true;
         btn.textContent = "⏳...";
         try {
@@ -1372,8 +1432,9 @@ document.addEventListener("DOMContentLoaded", () => {
         if ((!choice || choice === "default") && !input.reportValidity()) return;
         const target = choice && choice !== "default" ? choice : input.value.trim();
         const revision = nodeTargetRevision;
-        const sequence = ++activeNodeProbe;
         const client = appConfig.clients.find(item => item.id === btn.dataset.id);
+        const sequence = (nodeProbeSequences.get(client.id) || 0) + 1;
+        nodeProbeSequences.set(client.id, sequence);
         const pill = btn.querySelector(".rtt-pill");
         btn.disabled = true;
         pill.textContent = "检测中";
@@ -1382,7 +1443,7 @@ document.addEventListener("DOMContentLoaded", () => {
           if (revision !== nodeTargetRevision) return;
           pill.textContent = result.success ? "HTTP 成功" : "查看结果";
           pill.style.color = result.success ? "var(--success)" : "var(--warning)";
-          if (sequence === activeNodeProbe) showNodeResult(client, result);
+          if (nodeProbeSequences.get(client.id) === sequence) showNodeResult(client, result);
         } catch (error) {
           if (revision !== nodeTargetRevision) return;
           pill.textContent = "请求失败";
