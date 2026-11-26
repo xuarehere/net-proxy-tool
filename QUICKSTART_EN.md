@@ -1,12 +1,12 @@
 # Your first proxied request
 
-[简体中文](QUICKSTART.md) · [Downloads](README_EN.md#download-and-open-the-console) · [Troubleshooting](docs/operations_en.md)
+[简体中文](QUICKSTART.md) · [Downloads](README.md#download-and-open-the-console) · [Troubleshooting](docs/operations_en.md)
 
 Have a running HTTP or mixed-mode proxy that you are authorized to use. Find its **listening host and port** in your proxy client's settings. A proxy on this computer can usually be reached at `127.0.0.1`. Other hosts need an address and port reachable from their own network.
 
 ## 1. Select and verify an archive
 
-Windows uses the x64 ZIP. On a Mac, check About This Mac and choose ARM64 for Apple Silicon or x64 for Intel. On Linux, check `uname -m` and choose x64 for `x86_64` or ARM64 for `aarch64`. Linux bundles use glibc. Alpine users can use source or Docker. GitHub's **Source code** archives require a separate Python installation. [Download table](README_EN.md#download-and-open-the-console)
+Windows uses the x64 ZIP. On a Mac, check About This Mac and choose ARM64 for Apple Silicon or x64 for Intel. On Linux, check `uname -m` and choose x64 for `x86_64` or ARM64 for `aarch64`. Linux bundles use glibc. Alpine users can use source or Docker. GitHub's **Source code** archives require a separate Python installation. [Download table](README.md#download-and-open-the-console)
 
 To verify a download, get `SHA256SUMS.txt` from the same release. Run the appropriate command in the download directory and compare the 64 hex digits with the entry for the exact filename. Substitute your archive name if the architecture differs.
 

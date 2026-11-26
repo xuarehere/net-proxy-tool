@@ -70,6 +70,25 @@ jobs:
           path: dist/net-proxy-tool-*
           if-no-files-found: error
 
+  compatibility:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.8', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install test-only tools where the version allows them
+        run: python -m pip install -r requirements-dev.txt
+      - name: Keep the runtime on the standard library
+        run: python -X utf8 tools/kiro/check_stdlib.py --all
+      - run: python -X utf8 -m unittest discover -s test
+
   distributions:
     name: Portable on ${{ matrix.base }}
     needs: native

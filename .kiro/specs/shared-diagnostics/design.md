@@ -88,7 +88,7 @@ The response shape, the status codes and the target order are unchanged, so the 
 | `pyproject.toml` | `version = "x.y.z"` |
 | `config.example.json` | `"version": "x.y.z"` |
 | `README.md` | the release download links and the download heading |
-| `README_EN.md` | the same |
+| `README.zh-CN.md` | the same |
 | `CHANGELOG.md` | the newest `## [x.y.z]` heading |
 
 It prints one line per source with the value it found, then one line per mismatch. It also compares the `no_proxy` value of `config.example.json` with `sdk.config.NO_PROXY`. It exits with code 1 when anything disagrees.

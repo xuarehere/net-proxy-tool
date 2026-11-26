@@ -10,7 +10,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools" / "kiro"))
 
-from sdk.config import NO_PROXY, proxy_url  # noqa: E402
+from sdk.config import NO_PROXY, VERSION, proxy_url  # noqa: E402
 from web import diagnostics  # noqa: E402
 import check_release_consistency  # noqa: E402
 
@@ -128,8 +128,8 @@ class ReleaseConsistencyTests(unittest.TestCase):
         (root / "README.md").write_text(
             "下载 v{}\nhttps://example.invalid/releases/download/v{}/file.zip\n".format(version, version),
             encoding="utf-8")
-        (root / "README_EN.md").write_text(
-            "Download v{}\nhttps://example.invalid/releases/download/v{}/file.zip\n".format(version, version),
+        (root / "README.zh-CN.md").write_text(
+            "下载 v{}\nhttps://example.invalid/releases/download/v{}/file.zip\n".format(version, version),
             encoding="utf-8")
         (root / "CHANGELOG.md").write_text("## [{}]\n\n- change\n".format(changelog), encoding="utf-8")
         return root
@@ -151,11 +151,11 @@ class ReleaseConsistencyTests(unittest.TestCase):
     def test_a_stale_readme_link_is_reported(self):
         with tempfile.TemporaryDirectory(prefix="npt-release-") as directory:
             root = self.build(directory)
-            (root / "README_EN.md").write_text(
+            (root / "README.zh-CN.md").write_text(
                 "Download v1.4.3\nhttps://example.invalid/releases/download/v1.4.3/file.zip\n",
                 encoding="utf-8")
             _, mismatches = check_release_consistency.collect(root)
-        self.assertTrue(any(name == "README_EN.md" for name, _, _ in mismatches))
+        self.assertTrue(any(name == "README.zh-CN.md" for name, _, _ in mismatches))
 
     def test_a_different_example_bypass_list_is_reported(self):
         with tempfile.TemporaryDirectory(prefix="npt-release-") as directory:
@@ -167,8 +167,10 @@ class ReleaseConsistencyTests(unittest.TestCase):
 
     def test_the_repository_state_is_reported_honestly(self):
         found, mismatches = check_release_consistency.collect(ROOT)
-        self.assertEqual(found["sdk/config.py"], "1.4.3")
-        self.assertTrue(mismatches, "the unreleased state must be reported, not hidden")
+        self.assertEqual(found["sdk/config.py"], VERSION)
+        self.assertEqual(mismatches, [], "the released state must agree everywhere")
+        self.assertIn("README.md", found)
+        self.assertIn("README.zh-CN.md", found)
 
 
 if __name__ == "__main__":

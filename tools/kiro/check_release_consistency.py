@@ -21,7 +21,7 @@ VERSION_FILES = (
     ("pyproject.toml", re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)),
     ("config.example.json", re.compile(r'"version"\s*:\s*"([^"]+)"')),
 )
-README_FILES = ("README.md", "README_EN.md")
+README_FILES = ("README.md", "README.zh-CN.md")
 RELEASE_LINK = re.compile(r"releases/(?:download|tag)/v([0-9]+\.[0-9]+\.[0-9]+)")
 DOWNLOAD_HEADING = re.compile(r"(?:下载|Download)\s+v([0-9]+\.[0-9]+\.[0-9]+)")
 CHANGELOG_HEADING = re.compile(r"^##\s+\[([0-9]+\.[0-9]+\.[0-9]+)\]", re.MULTILINE)
