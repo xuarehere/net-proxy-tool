@@ -45,10 +45,11 @@ Issues = "https://github.com/xuarehere/net-proxy-tool/issues"
 [project.scripts]
 with-proxy = "with_proxy:main"
 net-proxy-tool = "launcher:main"
+net-proxy-tool-mcp = "net_proxy_mcp:main"
 
 [tool.setuptools]
 packages = ["sdk", "web"]
-py-modules = ["with_proxy", "launcher"]
+py-modules = ["with_proxy", "launcher", "net_proxy_mcp"]
 
 [tool.setuptools.package-data]
 web = ["static/*", "*.sh"]

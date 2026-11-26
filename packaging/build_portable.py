@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LOCK = json.loads((ROOT / "packaging/runtimes.lock.json").read_text(encoding="utf-8"))
 PREFIX = "net-proxy-tool/"
 FILES = """
-Start.bat runtime-select.cmd net-proxy-tool launcher.py with_proxy.py
+Start.bat runtime-select.cmd net-proxy-tool launcher.py with_proxy.py net_proxy_mcp.py
 config.example.json LICENSE README.md README_EN.md QUICKSTART.md CHANGELOG.md SECURITY.md
 QUICKSTART_EN.md CONTRIBUTING.md docs/operations.md docs/operations_en.md docs/assets/console.png
 docs/assets/architecture.zh.svg docs/assets/architecture.en.svg docs/render_architecture.py
