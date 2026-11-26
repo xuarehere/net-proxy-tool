@@ -197,6 +197,18 @@ def _run_program(argv, directory, environment, timeout, limit, cancel_check=None
     return outcome
 
 
+def _contacted_hosts(observer):
+    """The hosts the observation gateway saw, once each, in the order of first contact."""
+    hosts = []
+    for record in observer.records_list():
+        if record.get("outcome") != "established":
+            continue
+        entry = {"host": record.get("host", ""), "port": record.get("port", 0)}
+        if entry not in hosts:
+            hosts.append(entry)
+    return hosts
+
+
 class ToolRegistry:
     """The tools the server offers, with their schemas and their answers."""
 
@@ -289,21 +301,39 @@ class ToolRegistry:
         limit = int(self._bounded_number(arguments.get("max_output_bytes"), DEFAULT_OUTPUT_BYTES,
                                          MAX_OUTPUT_BYTES, "max_output_bytes"))
         environment = dict(os.environ)
-        environment.update(proxy_environment(cfg, gateway["host"], int(gateway["port"])))
-        program = shutil.which(argv[0])
-        if not program:
-            raise McpError(INVALID_PARAMS, "{!r} is not on the search path".format(argv[0]))
-        if os.name == "nt" and program.lower().endswith((".bat", ".cmd")):
-            raise McpError(INVALID_PARAMS, "a .bat or .cmd program needs a command interpreter")
-        digest = hashlib.sha256("\0".join(argv).encode("utf-8", "replace")).hexdigest()[:16]
-        started = time.monotonic()
-        outcome = _run_program([program] + list(argv[1:]), directory, environment, timeout, limit,
-                               cancel_check)
-        outcome.update(program=argv[0], argument_count=len(argv), argument_hash=digest,
-                       cwd=str(directory), duration_ms=round((time.monotonic() - started) * 1000),
-                       gateway={"id": gateway.get("id"), "host": gateway.get("host"),
-                                "port": int(gateway.get("port") or 0)},
-                       proxy_url=proxy_url(gateway["host"], int(gateway["port"])))
+        upstream = "{}:{}".format(gateway["host"], int(gateway["port"]))
+        observer = None
+        if arguments.get("inspect"):
+            from web.local_gateway import LocalGateway
+            observer = LocalGateway(port=0, upstream=upstream, allowed_ports=(80, 443))
+            try:
+                observer.start()
+            except OSError as exc:
+                raise McpError(INTERNAL_ERROR, "the observation gateway cannot start",
+                               {"type": type(exc).__name__})
+            upstream = "{}:{}".format(observer.host, observer.port)
+        try:
+            environment.update(proxy_environment(cfg, *upstream.rsplit(":", 1)))
+            program = shutil.which(argv[0])
+            if not program:
+                raise McpError(INVALID_PARAMS, "{!r} is not on the search path".format(argv[0]))
+            if os.name == "nt" and program.lower().endswith((".bat", ".cmd")):
+                raise McpError(INVALID_PARAMS, "a .bat or .cmd program needs a command interpreter")
+            digest = hashlib.sha256("\0".join(argv).encode("utf-8", "replace")).hexdigest()[:16]
+            started = time.monotonic()
+            outcome = _run_program([program] + list(argv[1:]), directory, environment, timeout, limit,
+                                   cancel_check)
+            outcome.update(program=argv[0], argument_count=len(argv), argument_hash=digest,
+                           cwd=str(directory), duration_ms=round((time.monotonic() - started) * 1000),
+                           gateway={"id": gateway.get("id"), "host": gateway.get("host"),
+                                    "port": int(gateway.get("port") or 0)},
+                           proxy_url=proxy_url(gateway["host"], int(gateway["port"])))
+            if observer is not None:
+                outcome["contacted_hosts"] = _contacted_hosts(observer)
+                outcome["observed"] = True
+        finally:
+            if observer is not None:
+                observer.stop()
         self._audit_run(outcome)
         return outcome
 
@@ -585,7 +615,9 @@ class McpServer:
                  "address": {"type": "string", "description": "A host:port address to use instead."},
                  "cwd": {"type": "string", "description": "A directory inside the server directory."},
                  "timeout": {"type": "number", "description": "Seconds, at most 600."},
-                 "max_output_bytes": {"type": "number", "description": "Bytes, at most 262144."}},
+                 "max_output_bytes": {"type": "number", "description": "Bytes, at most 262144."},
+                 "inspect": {"type": "boolean",
+                             "description": "Observe the hosts the command reaches and report them."}},
                  "required": ["argv"], "additionalProperties": False},
              "annotations": {"readOnlyHint": False}},
         ]

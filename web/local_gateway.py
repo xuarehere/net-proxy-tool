@@ -50,6 +50,15 @@ class _Server(socketserver.ThreadingTCPServer):
 class LocalGateway:
     """A loopback proxy that forwards requests and remembers the connections."""
 
+    _live = 0
+    _live_lock = threading.Lock()
+
+    @classmethod
+    def live_count(cls):
+        """How many gateways are running in this process."""
+        with cls._live_lock:
+            return cls._live
+
     def __init__(self, host="127.0.0.1", port=0, upstream=None, allowed_ports=DEFAULT_ALLOWED_PORTS,
                  max_tunnels=MAX_TUNNELS, max_header_bytes=MAX_HEADER_BYTES,
                  connect_timeout=CONNECT_TIMEOUT, idle_timeout=IDLE_TIMEOUT,
@@ -82,6 +91,8 @@ class LocalGateway:
         self.server = server
         self.thread = thread
         self.port = server.server_address[1]
+        with self._live_lock:
+            type(self)._live += 1
         return self.port
 
     def stop(self):
@@ -95,6 +106,8 @@ class LocalGateway:
             self.thread.join(timeout=5)
             self.thread = None
         self.port = None
+        with self._live_lock:
+            type(self)._live = max(0, type(self)._live - 1)
 
     @property
     def running(self):
@@ -124,7 +137,7 @@ class LocalGateway:
             if head is None:
                 record["outcome"] = "failed"
                 return
-            request_line, headers, remainder = head
+            request_line, headers, remainder, raw_head = head
             parts = request_line.split(" ")
             if len(parts) != 3:
                 self._reply(connection, 400, "Bad Request")
@@ -151,7 +164,8 @@ class LocalGateway:
                     return
                 self.tunnels += 1
             try:
-                self._forward(connection, method, target, host, port, headers, remainder, record)
+                self._forward(connection, method, target, host, port, headers, remainder, raw_head,
+                              record)
             finally:
                 with self.lock:
                     self.tunnels -= 1
@@ -166,7 +180,7 @@ class LocalGateway:
             record["time"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
             self._remember(record)
 
-    def _forward(self, connection, method, target, host, port, headers, remainder, record):
+    def _forward(self, connection, method, target, host, port, headers, remainder, raw_head, record):
         upstream = None
         try:
             if self.upstream:
@@ -180,9 +194,24 @@ class LocalGateway:
         try:
             upstream.settimeout(self.connect_timeout)
             if method.upper() == "CONNECT":
-                self._reply(connection, 200, "Connection Established")
+                if self.upstream:
+                    # An upstream proxy performs the second hop itself, so it needs the
+                    # original CONNECT request and its own answer.
+                    upstream.sendall(raw_head + b"\r\n\r\n" + remainder)
+                    answer = self._read_upstream_answer(upstream)
+                    if answer is None:
+                        self._reply(connection, 502, "Bad Gateway")
+                        record["outcome"] = "failed"
+                        return
+                    connection.sendall(answer)
+                else:
+                    self._reply(connection, 200, "Connection Established")
                 record["outcome"] = "established"
-                sent, received = self._relay(connection, upstream, remainder)
+                sent, received = self._relay(connection, upstream, b"")
+            elif self.upstream:
+                upstream.sendall(raw_head + b"\r\n\r\n" + remainder)
+                record["outcome"] = "established"
+                sent, received = self._relay(connection, upstream, b"")
             else:
                 upstream.sendall(self._origin_request(method, target, headers, remainder))
                 record["outcome"] = "established"
@@ -196,6 +225,21 @@ class LocalGateway:
                 upstream.close()
             except OSError:
                 pass
+
+    def _read_upstream_answer(self, upstream):
+        """Read the answer the upstream proxy sent, bounded by the head limit."""
+        data = b""
+        while b"\r\n\r\n" not in data:
+            try:
+                chunk = upstream.recv(4096)
+            except OSError:
+                return None
+            if not chunk:
+                return None
+            data += chunk
+            if len(data) > self.max_header_bytes:
+                return None
+        return data
 
     def _relay(self, client, upstream, remainder):
         """Move bytes in both directions until one side stops or the idle timeout passes."""
@@ -237,7 +281,7 @@ class LocalGateway:
         return sent, received
 
     def _read_head(self, connection):
-        """Return (request line, header block, trailing bytes), or None."""
+        """Return (request line, header block, trailing bytes, raw head), or None."""
         data = b""
         while b"\r\n\r\n" not in data:
             try:
@@ -255,7 +299,7 @@ class LocalGateway:
         if not lines or not lines[0]:
             return None
         try:
-            return lines[0].decode("latin-1"), b"\r\n".join(lines[1:]), remainder
+            return lines[0].decode("latin-1"), b"\r\n".join(lines[1:]), remainder, head
         except UnicodeDecodeError:
             return None
 

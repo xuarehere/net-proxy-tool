@@ -34,8 +34,8 @@ class LocalGatewayTests(unittest.TestCase):
         self.gateway.start()
         self.addCleanup(self.gateway.stop)
 
-    def raw(self, payload, read=4096):
-        with socket.create_connection(("127.0.0.1", self.gateway.port), timeout=5) as connection:
+    def raw(self, payload, read=4096, port=None):
+        with socket.create_connection(("127.0.0.1", port or self.gateway.port), timeout=5) as connection:
             connection.sendall(payload)
             data = b""
             while len(data) < read:
@@ -115,6 +115,73 @@ class LocalGatewayTests(unittest.TestCase):
         for _ in range(5):
             gateway._remember({"method": "GET"})
         self.assertEqual(len(gateway.records_list()), 3)
+
+    def test_an_upstream_receives_the_original_request(self):
+        received = []
+
+        class UpstreamProxy(BaseHTTPRequestHandler):
+            def do_GET(self):
+                received.append(self.path)
+                self.send_response(200)
+                self.send_header("Content-Length", "4")
+                self.end_headers()
+                self.wfile.write(b"upst")
+
+            def do_CONNECT(self):
+                received.append("CONNECT " + self.path)
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        upstream = ThreadingHTTPServer(("127.0.0.1", 0), UpstreamProxy)
+        worker = threading.Thread(target=upstream.serve_forever, daemon=True)
+        worker.start()
+        self.addCleanup(upstream.server_close)
+        self.addCleanup(worker.join, 2)
+        self.addCleanup(upstream.shutdown)
+
+        gateway = LocalGateway(port=0, upstream="127.0.0.1:{}".format(upstream.server_address[1]),
+                               allowed_ports=(80, 443, self.origin_port))
+        gateway.start()
+        self.addCleanup(gateway.stop)
+
+        request = ("GET http://127.0.0.1:{}/chained HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+                   .format(self.origin_port)).encode()
+        answer = self.raw(request, port=gateway.port)
+        self.assertIn(b"200", answer.split(b"\r\n", 1)[0])
+        self.assertEqual(received, ["http://127.0.0.1:{}/chained".format(self.origin_port)])
+
+    def test_a_connect_tunnel_is_chained_through_the_upstream(self):
+        received = []
+
+        class UpstreamProxy(BaseHTTPRequestHandler):
+            def do_CONNECT(self):
+                received.append(self.path)
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        upstream = ThreadingHTTPServer(("127.0.0.1", 0), UpstreamProxy)
+        worker = threading.Thread(target=upstream.serve_forever, daemon=True)
+        worker.start()
+        self.addCleanup(upstream.server_close)
+        self.addCleanup(worker.join, 2)
+        self.addCleanup(upstream.shutdown)
+
+        gateway = LocalGateway(port=0, upstream="127.0.0.1:{}".format(upstream.server_address[1]),
+                               allowed_ports=(80, 443, self.origin_port))
+        gateway.start()
+        self.addCleanup(gateway.stop)
+
+        request = ("CONNECT 127.0.0.1:{} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+                   .format(self.origin_port)).encode()
+        answer = self.raw(request, port=gateway.port)
+        self.assertIn(b"200", answer.split(b"\r\n", 1)[0])
+        self.assertEqual(received, ["127.0.0.1:{}".format(self.origin_port)])
 
 
 if __name__ == "__main__":
