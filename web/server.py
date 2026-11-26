@@ -38,9 +38,10 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(TOOL_DIR))
 
 from sdk.config import (DEFAULT_TEST_URL, VERSION, config_permission_warning, data_dir, load_config,
-                        resolve_gateway_info, rotate_log, save_config)
+                        proxy_url, resolve_gateway_info, rotate_log, save_config)
 from web import node_probe
 from web import node_baseline
+from web import diagnostics
 from web.ssh_askpass import password_environment
 
 CONFIG_WRITE_LOCK = threading.RLock()
@@ -650,7 +651,7 @@ def gateway_url(gw):
         raise ValueError("请先添加 HTTP 代理网关")
     normalize_protocol(gw.get("protocol", "http"))
     host, port = validate_host_port(gw.get("host"), gw.get("port"))
-    return f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
+    return proxy_url(host, port)
 
 
 def validate_bypass(value):
@@ -1423,44 +1424,13 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         gid = query.get("gateway_id", [None])[0]
 
         cfg = load_config()
-        gw = resolve_gateway_info(cfg, gid)
-        if not gw:
-            self.send_json({"gateway": None, "targets": [], "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "error": "未找到网关，请先在首页保存 HTTP 代理网关。"}, 404 if gid else 200)
+        report = diagnostics.status_report(cfg, gid, tcp_probe=check_tcp_port,
+                                           target_probe=check_http_target)
+        if report["gateway"] is None:
+            self.send_json(dict(report, error="未找到网关，请先在首页保存 HTTP 代理网关。"),
+                           404 if gid else 200)
             return
-        host, port = gw["host"], int(gw["port"])
-        proxy_url = gateway_url(gw)
-
-        gw_ok, gw_rtt = check_tcp_port(host, port)
-        results = {
-            "gateway": {
-                "id": gw.get("id"),
-                "name": gw.get("name"),
-                "host": host,
-                "port": port,
-                "online": False,
-                "tcp_ok": gw_ok,
-                "path_verified": False,
-                "latency_ms": gw_rtt if gw_ok else None,
-                "error": None if gw_ok else str(gw_rtt)
-            },
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "targets": []
-        }
-
-        if gw_ok:
-            targets = cfg.get("diagnostic_targets", {})
-            with ThreadPoolExecutor(max_workers=7) as pool:
-                futures = [
-                    pool.submit(check_http_target, name, info, proxy_url)
-                    for name, info in targets.items()
-                ]
-                for f in futures:
-                    results["targets"].append(f.result())
-            results["gateway"]["online"] = any(t.get("http_ok") for t in results["targets"])
-            results["gateway"]["path_verified"] = any(t.get("path_verified") for t in results["targets"])
-
-        self.send_json(results)
+        self.send_json(report)
 
     def handle_save_config(self):
         req_json = self.read_json_body()

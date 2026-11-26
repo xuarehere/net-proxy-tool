@@ -224,9 +224,14 @@ def resolve_gateway(cfg, gateway=None):
     return host, port
 
 
+def proxy_url(host, port):
+    """The HTTP proxy URL for one host and port, with IPv6 brackets."""
+    address = "[{}]".format(host) if ":" in host else host
+    return "http://{}:{}".format(address, port)
+
+
 def proxy_environment(cfg, host, port):
-    address = f"[{host}]" if ":" in host else host
-    url = f"http://{address}:{port}"
+    url = proxy_url(host, port)
     values = {"http_proxy": url, "https_proxy": url, "all_proxy": url,
               "no_proxy": cfg.get("no_proxy", NO_PROXY)}
     return dict(values, **{key.upper(): value for key, value in values.items()})
