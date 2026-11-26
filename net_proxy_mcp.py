@@ -12,16 +12,23 @@ switches a node and never changes a gateway.
     python -X utf8 net_proxy_mcp.py --config /path/to/config.json
 """
 import argparse
+import hashlib
 import json
 import os
+import shutil
+import signal
+import subprocess
 import sys
 import threading
+import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from sdk.config import proxy_environment, proxy_url  # noqa: E402
 
 PROTOCOL_VERSION = "2026-07-28"
 LEGACY_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
@@ -43,6 +50,13 @@ DEFAULT_TARGET_URL = "https://www.google.com/"
 MAX_TIMEOUT_SECONDS = 60
 DEFAULT_TIMEOUT_SECONDS = 15
 WORKER_COUNT = 4
+
+MAX_ARGUMENTS = 64
+MAX_ARGUMENT_LENGTH = 4096
+MAX_RUN_TIMEOUT_SECONDS = 600
+DEFAULT_RUN_TIMEOUT_SECONDS = 120
+MAX_OUTPUT_BYTES = 256 * 1024
+DEFAULT_OUTPUT_BYTES = 64 * 1024
 
 SERVER_NAME = "net-proxy-tool"
 SERVER_VERSION = "1.4.3"
@@ -95,11 +109,100 @@ def validate_version(params, method):
     return version
 
 
+def _read_capped(stream, limit, buffer):
+    """Read a stream into `buffer` until the limit is reached or the stream ends."""
+    while True:
+        try:
+            chunk = stream.read(4096)
+        except (OSError, ValueError):
+            break
+        if not chunk:
+            break
+        if len(buffer) < limit:
+            buffer.extend(chunk[: limit - len(buffer)])
+
+
+def stop_process_tree(process):
+    """Stop the child and every process it started."""
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        try:
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=30, shell=False)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    else:
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except (OSError, AttributeError):
+            pass
+
+
+def _run_program(argv, directory, environment, timeout, limit, cancel_check=None):
+    """Run one command and collect a bounded amount of its output."""
+    options = {"shell": False, "cwd": str(directory), "env": environment,
+               "stdout": subprocess.PIPE, "stderr": subprocess.PIPE}
+    if os.name == "nt":
+        options["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    else:
+        options["start_new_session"] = True
+    outcome = {"exit_code": None, "timed_out": False, "cancelled": False,
+               "stdout": "", "stderr": "", "stdout_truncated": False, "stderr_truncated": False,
+               "error": None}
+    try:
+        process = subprocess.Popen(argv, **options)
+    except OSError as exc:
+        outcome["error"] = type(exc).__name__
+        return outcome
+    out_buffer, err_buffer = bytearray(), bytearray()
+    readers = [threading.Thread(target=_read_capped, args=(process.stdout, limit, out_buffer)),
+               threading.Thread(target=_read_capped, args=(process.stderr, limit, err_buffer))]
+    for reader in readers:
+        reader.daemon = True
+        reader.start()
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            try:
+                process.wait(timeout=0.2)
+                break
+            except subprocess.TimeoutExpired:
+                if cancel_check is not None and cancel_check():
+                    outcome["cancelled"] = True
+                elif time.monotonic() >= deadline:
+                    outcome["timed_out"] = True
+                else:
+                    continue
+                stop_process_tree(process)
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    pass
+                break
+    finally:
+        for reader in readers:
+            reader.join(timeout=5)
+        for stream in (process.stdout, process.stderr):
+            try:
+                stream.close()
+            except (OSError, ValueError):
+                pass
+    outcome["exit_code"] = process.returncode
+    outcome["stdout_truncated"] = len(out_buffer) >= limit
+    outcome["stderr_truncated"] = len(err_buffer) >= limit
+    outcome["stdout"] = out_buffer.decode("utf-8", "replace")
+    outcome["stderr"] = err_buffer.decode("utf-8", "replace")
+    return outcome
+
+
 class ToolRegistry:
     """The tools the server offers, with their schemas and their answers."""
 
-    def __init__(self, config_path=None):
+    def __init__(self, config_path=None, start_directory=None):
         self.config_path = config_path
+        self.start_directory = Path(start_directory or os.getcwd()).resolve()
         self._server = None
 
     # -- helpers ---------------------------------------------------------
@@ -118,7 +221,7 @@ class ToolRegistry:
         return self.server().public_data(value)
 
     # -- tools -----------------------------------------------------------
-    def list_gateways(self, arguments):
+    def list_gateways(self, arguments, cancel_check=None):
         cfg = self.configuration()
         gateways = []
         for gateway in cfg.get("gateways", []):
@@ -134,7 +237,7 @@ class ToolRegistry:
         return {"gateways": gateways, "active_gateway_id": cfg.get("active_gateway_id", ""),
                 "count": len(gateways)}
 
-    def check_gateway(self, arguments):
+    def check_gateway(self, arguments, cancel_check=None):
         server = self.server()
         cfg = self.configuration()
         gateway = self._selected_gateway(cfg, arguments)
@@ -145,7 +248,7 @@ class ToolRegistry:
         result = server.check_http_target("Gateway probe", target_url, proxy, timeout=timeout)
         return self.public(dict(result, gateway_id=gateway.get("id")))
 
-    def check_gateway_targets(self, arguments):
+    def check_gateway_targets(self, arguments, cancel_check=None):
         from web import diagnostics
         server = self.server()
         cfg = self.configuration()
@@ -154,13 +257,13 @@ class ToolRegistry:
                                            target_probe=server.check_http_target)
         return self.public(report)
 
-    def list_nodes(self, arguments):
+    def list_nodes(self, arguments, cancel_check=None):
         from web import diagnostics
         cfg = self.configuration()
         summaries = [diagnostics.node_summary(cfg, node) for node in cfg.get("clients", [])]
         return {"nodes": summaries, "count": len(summaries)}
 
-    def test_node(self, arguments):
+    def test_node(self, arguments, cancel_check=None):
         server = self.server()
         cfg = self.configuration()
         node_id = arguments.get("node_id")
@@ -173,6 +276,85 @@ class ToolRegistry:
         target_url = arguments.get("target_url") or server.DEFAULT_TEST_URL
         result = server.check_node_requests(target, gateway, target_url)
         return self.public(result)
+
+    def run_with_proxy(self, arguments, cancel_check=None):
+        """Run one command with the proxy variables of a gateway."""
+        server = self.server()
+        cfg = self.configuration()
+        argv = self._validated_argv(arguments.get("argv"))
+        gateway = self._selected_gateway(cfg, arguments)
+        directory = self._working_directory(arguments.get("cwd"))
+        timeout = self._bounded_number(arguments.get("timeout"), DEFAULT_RUN_TIMEOUT_SECONDS,
+                                       MAX_RUN_TIMEOUT_SECONDS, "timeout")
+        limit = int(self._bounded_number(arguments.get("max_output_bytes"), DEFAULT_OUTPUT_BYTES,
+                                         MAX_OUTPUT_BYTES, "max_output_bytes"))
+        environment = dict(os.environ)
+        environment.update(proxy_environment(cfg, gateway["host"], int(gateway["port"])))
+        program = shutil.which(argv[0])
+        if not program:
+            raise McpError(INVALID_PARAMS, "{!r} is not on the search path".format(argv[0]))
+        if os.name == "nt" and program.lower().endswith((".bat", ".cmd")):
+            raise McpError(INVALID_PARAMS, "a .bat or .cmd program needs a command interpreter")
+        digest = hashlib.sha256("\0".join(argv).encode("utf-8", "replace")).hexdigest()[:16]
+        started = time.monotonic()
+        outcome = _run_program([program] + list(argv[1:]), directory, environment, timeout, limit,
+                               cancel_check)
+        outcome.update(program=argv[0], argument_count=len(argv), argument_hash=digest,
+                       cwd=str(directory), duration_ms=round((time.monotonic() - started) * 1000),
+                       gateway={"id": gateway.get("id"), "host": gateway.get("host"),
+                                "port": int(gateway.get("port") or 0)},
+                       proxy_url=proxy_url(gateway["host"], int(gateway["port"])))
+        self._audit_run(outcome)
+        return outcome
+
+    # -- internals -------------------------------------------------------
+    def _audit_run(self, outcome):
+        server = self.server()
+        status = "success" if outcome.get("exit_code") == 0 and not outcome.get("timed_out") else "failed"
+        server.write_audit_log(
+            "mcp_run_with_proxy", "-", status,
+            "program={} arguments={} hash={} exit={}".format(
+                outcome.get("program"), outcome.get("argument_count"),
+                outcome.get("argument_hash"), outcome.get("exit_code")))
+
+    @staticmethod
+    def _validated_argv(value):
+        if not isinstance(value, list) or not value or len(value) > MAX_ARGUMENTS:
+            raise McpError(INVALID_PARAMS, "argv must hold between 1 and {} arguments".format(MAX_ARGUMENTS))
+        for item in value:
+            if not isinstance(item, str) or not item:
+                raise McpError(INVALID_PARAMS, "every argument must be a non-empty string")
+            if "\x00" in item or len(item) > MAX_ARGUMENT_LENGTH:
+                raise McpError(INVALID_PARAMS,
+                               "an argument must be at most {} characters and contain no NUL".format(
+                                   MAX_ARGUMENT_LENGTH))
+        return list(value)
+
+    def _working_directory(self, value):
+        if value is None:
+            return self.start_directory
+        if not isinstance(value, str) or not value.strip():
+            raise McpError(INVALID_PARAMS, "cwd must be a path inside the server directory")
+        try:
+            candidate = Path(value).resolve()
+        except OSError:
+            raise McpError(INVALID_PARAMS, "cwd must be a path inside the server directory")
+        try:
+            candidate.relative_to(self.start_directory)
+        except ValueError:
+            raise McpError(INVALID_PARAMS,
+                           "cwd must be inside {}".format(self.start_directory))
+        return candidate
+
+    @staticmethod
+    def _bounded_number(value, default, maximum, name):
+        if value is None:
+            return default
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise McpError(INVALID_PARAMS, "{} must be a number".format(name))
+        if value <= 0:
+            raise McpError(INVALID_PARAMS, "{} must be greater than zero".format(name))
+        return min(float(value), float(maximum))
 
     # -- internals -------------------------------------------------------
     def _selected_gateway(self, cfg, arguments):
@@ -309,7 +491,7 @@ class McpServer:
 
     def answer(self, request_id, method, params):
         try:
-            result = self.dispatch(method, params)
+            result = self.dispatch(method, params, request_id)
         except McpError as exc:
             self.send_error(request_id, exc.code, exc.message, exc.data)
             return
@@ -325,7 +507,7 @@ class McpServer:
         self.send_result(request_id, result)
 
     # -- methods ---------------------------------------------------------
-    def dispatch(self, method, params):
+    def dispatch(self, method, params, request_id=None):
         if method == "initialize":
             version = validate_version(params, method)
             self.negotiated_version = version or LEGACY_VERSIONS[0]
@@ -346,10 +528,16 @@ class McpServer:
         if method == "tools/list":
             return {"tools": self.tool_descriptions()}
         if method == "tools/call":
-            return self.call_tool(params)
+            return self.call_tool(params, self._cancelled_check(request_id))
         if method == "ping":
             return {}
         raise McpError(METHOD_NOT_FOUND, "Unknown method {!r}".format(method))
+
+    def _cancelled_check(self, request_id):
+        """A callable that tells a running tool whether its request was cancelled."""
+        if request_id is None:
+            return None
+        return lambda: request_id in self.cancelled
 
     def capabilities(self):
         return {"tools": {"listChanged": False}}
@@ -388,9 +576,21 @@ class McpServer:
                  "target_url": {"type": "string", "description": "The URL to request."}},
                  "required": ["node_id"], "additionalProperties": False},
              "annotations": {"readOnlyHint": True}},
+            {"name": "run_with_proxy", "description":
+                "Run one command with the proxy variables of a gateway, without a shell.",
+             "inputSchema": {"type": "object", "properties": {
+                 "argv": {"type": "array", "items": {"type": "string"},
+                          "description": "The program and its arguments, one to sixty-four items."},
+                 "gateway_id": {"type": "string", "description": "A saved gateway identifier."},
+                 "address": {"type": "string", "description": "A host:port address to use instead."},
+                 "cwd": {"type": "string", "description": "A directory inside the server directory."},
+                 "timeout": {"type": "number", "description": "Seconds, at most 600."},
+                 "max_output_bytes": {"type": "number", "description": "Bytes, at most 262144."}},
+                 "required": ["argv"], "additionalProperties": False},
+             "annotations": {"readOnlyHint": False}},
         ]
 
-    def call_tool(self, params):
+    def call_tool(self, params, cancel_check=None):
         name = params.get("name")
         arguments = params.get("arguments")
         if not isinstance(arguments, dict):
@@ -401,11 +601,12 @@ class McpServer:
             "check_gateway_targets": self.registry.check_gateway_targets,
             "list_nodes": self.registry.list_nodes,
             "test_node": self.registry.test_node,
+            "run_with_proxy": self.registry.run_with_proxy,
         }.get(name)
         if handler is None:
             raise McpError(INVALID_PARAMS, "Unknown tool {!r}".format(name))
         try:
-            payload = handler(arguments)
+            payload = handler(arguments, cancel_check)
         except McpError:
             raise
         except Exception as exc:

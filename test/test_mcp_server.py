@@ -118,15 +118,18 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(result["_meta"][net_proxy_mcp.META_SERVER_INFO]["name"], "net-proxy-tool")
         self.assertTrue(result["instructions"])
 
-    def test_tools_list_describes_five_read_only_tools(self):
+    def test_tools_list_describes_five_read_only_tools_and_the_runner(self):
         answers, _ = self.serve([self.request(1, "tools/list")])
         tools = answers[0]["result"]["tools"]
         self.assertEqual([tool["name"] for tool in tools],
                          ["list_gateways", "check_gateway", "check_gateway_targets",
-                          "list_nodes", "test_node"])
+                          "list_nodes", "test_node", "run_with_proxy"])
         for tool in tools:
-            self.assertTrue(tool["annotations"]["readOnlyHint"])
             self.assertIn("inputSchema", tool)
+        read_only = [tool["name"] for tool in tools if tool["annotations"]["readOnlyHint"]]
+        self.assertEqual(read_only, ["list_gateways", "check_gateway", "check_gateway_targets",
+                                     "list_nodes", "test_node"])
+        self.assertFalse(tools[-1]["annotations"]["readOnlyHint"])
 
     def test_tool_call_answers_with_content_structured_content_and_is_error(self):
         answers, _ = self.serve([self.request(1, "tools/call", {"name": "list_gateways", "arguments": {}})])
@@ -178,7 +181,7 @@ class McpServerTests(unittest.TestCase):
         release = threading.Event()
 
         class SlowRegistry(ToolRegistry):
-            def list_gateways(self, arguments):
+            def list_gateways(self, arguments, cancel_check=None):
                 started.set()
                 release.wait(5)
                 return {"gateways": []}
