@@ -26,11 +26,14 @@ class RecordingProxy(BaseHTTPRequestHandler):
         pass
 
 
-def api(port, path, payload=None):
+def api(port, path, payload=None, token=None):
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=90)
     try:
         data = json.dumps(payload).encode() if payload is not None else None
-        conn.request("POST" if data else "GET", path, data, {"Content-Type": "application/json"})
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Cookie"] = "npt_access=" + token
+        conn.request("POST" if data else "GET", path, data, headers)
         res = conn.getresponse()
         body = res.read()
         if res.status != 200:

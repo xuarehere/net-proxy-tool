@@ -37,7 +37,8 @@ STATIC_DIR = WEB_DIR / "static"
 if __package__ in (None, ""):
     sys.path.insert(0, str(TOOL_DIR))
 
-from sdk.config import DEFAULT_TEST_URL, VERSION, data_dir, load_config, resolve_gateway_info, save_config
+from sdk.config import (DEFAULT_TEST_URL, VERSION, config_permission_warning, data_dir, load_config,
+                        resolve_gateway_info, rotate_log, save_config)
 from web import node_probe
 from web import node_baseline
 from web.ssh_askpass import password_environment
@@ -46,6 +47,12 @@ CONFIG_WRITE_LOCK = threading.RLock()
 REQUEST_TIMEOUT_SECONDS = 60
 MAX_JSON_BODY_BYTES = 1024 * 1024
 MAX_SAFE_INTEGER = (1 << 53) - 1
+AUDIT_LOG_LIMIT_BYTES = 5 * 1024 * 1024
+AUDIT_LOG_GENERATIONS = 3
+ACCESS_COOKIE_NAME = "npt_access"
+ACCESS_TOKEN_ENV = "NET_PROXY_ACCESS_TOKEN"
+# The console access state, resolved once when the server starts.
+ACCESS = {"token": "", "required": False, "printed": False}
 
 
 class RequestError(ValueError):
@@ -190,16 +197,20 @@ def write_audit_log(action, node_id="-", status="info", details="", operator_ip=
     Appends an event record to the lightweight audit log in JSON Lines format.
     """
     try:
-        audit_path().parent.mkdir(parents=True, exist_ok=True)
+        path = audit_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rotate_log(path, AUDIT_LOG_LIMIT_BYTES, AUDIT_LOG_GENERATIONS)
+        client = operator_ip or "127.0.0.1"
         record = {
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "action": action,
             "node_id": node_id or "-",
-            "operator_ip": operator_ip or "127.0.0.1",
+            "operator_ip": client,
+            "client_address": client,
             "status": status,
             "details": str(details or "")
         }
-        with open(audit_path(), "a", encoding="utf-8") as f:
+        with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception as exc:
         print("[Audit Log Warning] {}".format(type(exc).__name__), file=sys.stderr)
@@ -249,6 +260,79 @@ def is_local_host(host: str) -> bool:
         return True
     except OSError:
         return False
+
+
+def is_loopback_client(address) -> bool:
+    """True for a loopback client, including an IPv4-mapped IPv6 address."""
+    if not address:
+        return False
+    name = str(address).strip().lower()
+    if name.startswith("::ffff:"):
+        name = name[len("::ffff:"):]
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False
+
+
+def console_host_names():
+    """Names and addresses that identify this machine, without a public DNS lookup.
+
+    The interface addresses are found by connecting an unbound UDP socket, which
+    selects a source address and sends no packet.
+    """
+    names = {"localhost", "127.0.0.1", "::1", socket.gethostname().lower()}
+    for family, probe_address in ((socket.AF_INET, "192.0.2.1"), (socket.AF_INET6, "2001:db8::1")):
+        try:
+            with socket.socket(family, socket.SOCK_DGRAM) as probe:
+                probe.connect((probe_address, 9))
+                names.add(probe.getsockname()[0])
+        except OSError:
+            continue
+    return names
+
+
+def allowed_host_names():
+    """The Host header names the console accepts.
+
+    A console that is published beyond loopback must also answer for the name
+    or address it was published under. A loopback console keeps its strict list.
+    """
+    names = {"localhost", "127.0.0.1", "::1"}
+    if ACCESS["required"]:
+        names |= console_host_names()
+    return names
+
+
+def resolve_access_token(bind_host):
+    """Return the access token for this console and whether one is required."""
+    configured = (os.environ.get(ACCESS_TOKEN_ENV) or "").strip()
+    if configured:
+        return configured, True
+    if is_loopback_client(bind_host):
+        return "", False
+    return secrets.token_urlsafe(32), True
+
+
+def access_link_host(bind_host):
+    """The address a published console is reached at, for the printed access link."""
+    if bind_host not in ("0.0.0.0", "::", ""):
+        return bind_host
+    for family, probe_address in ((socket.AF_INET, "192.0.2.1"), (socket.AF_INET6, "2001:db8::1")):
+        try:
+            with socket.socket(family, socket.SOCK_DGRAM) as probe:
+                probe.connect((probe_address, 9))
+                address = probe.getsockname()[0]
+            if not is_loopback_client(address):
+                return address
+        except OSError:
+            continue
+    return socket.gethostname().lower()
+
+
+def redact_access_token(text):
+    """Hide the access token in a request line before it is logged."""
+    return re.sub(r"([?&]token=)[^&\s]*", r"\1<redacted>", str(text))
 
 
 def check_tcp_port(host: str, port: int, timeout: float = 1.5):
@@ -1060,6 +1144,64 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         super().setup()
         self.connection.settimeout(REQUEST_TIMEOUT_SECONDS)
 
+    def log_request(self, code="-", size="-"):
+        # The access link carries the token in the query string; it must not
+        # reach the console log.
+        self.log_message('"%s" %s %s', redact_access_token(self.requestline), str(code), str(size))
+
+    def cookie_value(self, name):
+        for part in (self.headers.get("Cookie", "") or "").split(";"):
+            key, _, value = part.strip().partition("=")
+            if key == name:
+                return value
+        return ""
+
+    def send_access_granted(self, token):
+        self.send_response(302)
+        self.send_header("Location", "/")
+        self.send_header("Set-Cookie", "{}={}; HttpOnly; SameSite=Strict; Path=/".format(
+            ACCESS_COOKIE_NAME, token))
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def send_access_denied(self):
+        body = ("This console requires an access token. Open the access link printed in the "
+                "console log, or set NET_PROXY_ACCESS_TOKEN and restart the console.\n"
+                "此控制台需要访问令牌。请打开控制台日志中打印的访问链接，"
+                "或设置 NET_PROXY_ACCESS_TOKEN 后重启控制台。\n").encode("utf-8")
+        self.send_response(401)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def authorize_access(self):
+        """Allow loopback clients; require the access token from everyone else."""
+        if not ACCESS["required"]:
+            return True
+        if is_loopback_client(self.client_address[0]):
+            return True
+        token = ACCESS["token"]
+        cookie = self.cookie_value(ACCESS_COOKIE_NAME)
+        if cookie and hmac.compare_digest(cookie, token):
+            return True
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in ("", "/"):
+            supplied = (urllib.parse.parse_qs(parsed.query).get("token") or [""])[0]
+            if supplied and hmac.compare_digest(supplied, token):
+                self.send_access_granted(token)
+            else:
+                self.send_access_denied()
+            return False
+        self.send_access_denied()
+        return False
+
+    def write_audit(self, action, node_id="-", status="info", details=""):
+        """Record an audit entry for the client that made this request."""
+        address = getattr(self, "client_address", None)
+        write_audit_log(action, node_id, status, details,
+                        operator_ip=address[0] if address else "127.0.0.1")
+
     def end_headers(self):
         # 强制所有静态文件与动态接口下发防缓存头，杜绝浏览器脏缓存假死
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0")
@@ -1141,7 +1283,7 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
             parsed = urllib.parse.urlsplit("//" + host)
             if parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
                 raise ValueError()
-            allowed = {"localhost", "127.0.0.1", "::1", self.connection.getsockname()[0]}
+            allowed = allowed_host_names() | {self.connection.getsockname()[0]}
             # A published container port can be forwarded from a different local IP.
             if parsed.hostname not in allowed:
                 raise ValueError()
@@ -1153,6 +1295,8 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         except ValueError:
             self.close_connection = True
             self.send_error(403, "Untrusted Host or Origin")
+            return False
+        if not self.authorize_access():
             return False
         return True
 
@@ -1554,7 +1698,7 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         if archived:
             cfg["archived_clients"] = [item for item in cfg.get("archived_clients", []) if item is not archived]
         save_config(cfg)
-        write_audit_log("client_add", target["id"], "success", "节点登记已保存")
+        self.write_audit("client_add", target["id"], "success", "节点登记已保存")
         self.send_json({"success": True, "restored_registration": bool(archived), "client": node_public_state(target),
                         "message": "原节点登记和可用绑定已恢复；认证资料使用本次输入。" if archived else "节点登记已保存，尚未开启代理。"})
 
@@ -1615,7 +1759,7 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         target.clear()
         target.update(draft)
         save_config(cfg)
-        write_audit_log("client_update", target["id"], "success", "节点登记已更新")
+        self.write_audit("client_update", target["id"], "success", "节点登记已更新")
         self.send_json({"success": True, "client": node_public_state(target), "message": "节点登记已更新。"})
 
     def handle_client_delete(self):
@@ -1638,7 +1782,7 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         cfg["archived_clients"] = [item for item in cfg.get("archived_clients", []) if item.get("id") != target["id"]] + [archive]
         cfg["clients"] = [item for item in cfg["clients"] if item is not target]
         save_config(cfg)
-        write_audit_log("client_delete", target["id"], "success", "节点登记已移除，认证资料已删除")
+        self.write_audit("client_delete", target["id"], "success", "节点登记已移除，认证资料已删除")
         self.send_json({"success": True, "id": target["id"], "message": "节点登记已移除，认证资料已删除；仅保留加回所需的非敏感登记信息。"})
 
     def handle_node_switch(self):
@@ -1660,7 +1804,8 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         update_node_outcome(target, action, result)
         save_config(cfg)
         ok = result.get("returncode") == 0
-        write_audit_log("node_switch_" + action, target["id"], "success" if ok else "failed", "节点操作已核验" if ok else "核验未确认，登记保留")
+        self.write_audit("node_switch_" + action, target["id"], "success" if ok else "failed",
+                         "节点操作已核验" if ok else "核验未确认，登记保留")
         self.send_json({"success": ok, "node_id": target["id"], "action": action,
                         "node_revision": node_revision(target), "binding_revision": target.get("binding_revision", 0),
                         "gateway_id": target.get("bound_gateway_id"), "is_proxy_enabled": target.get("is_proxy_enabled", False),
@@ -1702,7 +1847,8 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
             results.append({"node_id": target["id"], "name": target.get("name", target["id"]), "success": ok,
                             "managed_state": target["managed_state"], "verification": target["verification"],
                             "node_revision": node_revision(target), "error": result.get("error")})
-            write_audit_log("batch_" + action, target["id"], "success" if ok else "failed", "已核验" if ok else "未核验")
+            self.write_audit("batch_" + action, target["id"], "success" if ok else "failed",
+                             "已核验" if ok else "未核验")
         count = sum(item["success"] for item in results)
         self.send_json({"success": count == len(results), "action": action, "results": results,
                         "total": len(results), "success_count": count,
@@ -1729,7 +1875,8 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
                                                 error="巡检期间节点绑定已变化，请重新测试。")
         passed = sum(bool(item.get("success")) for item in health_map.values())
         outcome = "success" if passed == len(clients) else "partial" if passed else "failed"
-        write_audit_log("health_check_all", "-", outcome, f"巡检完成，{passed}/{len(clients)} 个节点两路 HTTP 请求成功")
+        self.write_audit("health_check_all", "-", outcome,
+                         f"巡检完成，{passed}/{len(clients)} 个节点两路 HTTP 请求成功")
         self.send_json({"success": True, "completed": True, "all_http_ok": passed == len(clients),
                         "health_map": health_map, "target_url": url, "total": len(clients),
                         "http_success_count": sum(bool(item.get("online")) for item in health_map.values()),
@@ -1925,8 +2072,17 @@ def run_server(port=None, bind=None):
     cfg = load_config()
     port = port if port is not None else int(cfg.get("web_port", 8899))
     host = bind or os.environ.get("NET_PROXY_BIND", "127.0.0.1")
+    token, required = resolve_access_token(host)
+    ACCESS.update(token=token, required=required)
+    warning = config_permission_warning()
+    if warning:
+        print(warning, file=sys.stderr, flush=True)
     with ThreadingHTTPServer((host, port), ProxyConsoleHandler) as httpd:
         print(f"net-proxy-tool | http://{host}:{httpd.server_port}", flush=True)
+        if required and not ACCESS["printed"]:
+            ACCESS["printed"] = True
+            print("net-proxy-tool | access link: http://{}:{}/?token={}".format(
+                access_link_host(host), httpd.server_port, token), flush=True)
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:

@@ -13,7 +13,10 @@ import sys
 import time
 import webbrowser
 
-from sdk.config import atomic_json, data_dir, load_config
+from sdk.config import atomic_json, data_dir, load_config, rotate_log
+
+CONSOLE_LOG_LIMIT_BYTES = 10 * 1024 * 1024
+CONSOLE_LOG_GENERATIONS = 1
 
 
 @contextlib.contextmanager
@@ -124,6 +127,7 @@ def start(port, directory, state, state_path):
     kwargs = ({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt"
               else {"start_new_session": True})
     log_path = directory / "console.log"
+    rotate_log(log_path, CONSOLE_LOG_LIMIT_BYTES, CONSOLE_LOG_GENERATIONS)
     with log_path.open("ab") as log:
         proc = subprocess.Popen([sys.executable, "-m", "web.server", str(port)],
                                 cwd=str(Path(__file__).resolve().parent), env=environment,

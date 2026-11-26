@@ -4,6 +4,11 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:${NET_PROXY_HOST_PORT:-8899}:8899"
+    environment:
+      # The container console listens on every interface, so it answers remote
+      # clients only with an access token. Leave it empty to let the console
+      # generate one and print the access link in the container log.
+      NET_PROXY_ACCESS_TOKEN: "${NET_PROXY_ACCESS_TOKEN:-}"
     volumes:
       - proxy-data:/app/data
 

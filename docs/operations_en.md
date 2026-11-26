@@ -60,6 +60,20 @@ docker compose ps
 docker compose logs --tail=80
 ```
 
+The console inside the container listens on every interface, so **a browser that is not on the loopback interface needs an access token**. The startup log prints one access link:
+
+```bash
+docker compose logs | grep "access link"
+```
+
+Open that link once: the console then hands out an `npt_access` cookie (HttpOnly, SameSite=Strict) and later requests use it. You can also choose the token yourself before starting Compose:
+
+```bash
+NET_PROXY_ACCESS_TOKEN=replace-with-a-random-string docker compose up -d --build
+```
+
+Then open `http://127.0.0.1:8899/?token=replace-with-a-random-string` once.
+
 Open `http://127.0.0.1:8899/` on the host. Stop with `docker compose down`. Inside a container, `127.0.0.1` points back to that container. Choose a gateway address reachable from the container and allow connections from its network. To change the published port, set `NET_PROXY_HOST_PORT` before running Compose and adjust the browser URL.
 
 ## Diagnose by symptom
@@ -71,6 +85,7 @@ If the peer closes a TLS handshake before the GET is sent, the gateway probe rec
 | Windows reports that `roxy-tool` or `2` is not a command | Extract the entire Windows ZIP for the current release into a new directory and use its root `Start.bat`. The older UTF-8/LF batch file could parse incorrectly under code page 936. |
 | No page after double-click | Extract all files and check the architecture. Run the launcher in a terminal to see the error. Open the printed URL if needed. |
 | Port 8899 is occupied | Try a free port such as 8900. To stop a running instance for this configuration, use the same launcher with `--stop`. |
+| The page asks for an access token | The console listens beyond the loopback interface. Open the access link from the startup log, or set `NET_PROXY_ACCESS_TOKEN` and restart. |
 | The console opens but the proxy test fails | Verify the listening address and HTTP/mixed port. For a failed TCP connection, check the proxy service, interface and firewall. If TCP works, check protocol, upstream route and target. |
 | HTTP 407 | The gateway requires authentication. The setup form accepts host and port. Choose an HTTP proxy entry point you are authorized to use. |
 | Certificate error or target HTTP 403 / 429 | Check the target URL, certificate chain, site policy, rate limits and proxy logs. |

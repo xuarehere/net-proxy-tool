@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.0] - unreleased
+
+### Security
+
+- The console validates every API request before it reaches a handler: typed fields, bounded sizes, one JSON media type and one body length. A malformed request is answered with a clear error instead of an internal failure.
+- An unexpected error answers with an error identifier only. The details stay in the console log, where they can be matched to the identifier.
+- A console that listens beyond the loopback interface requires an access token from remote clients. The token never appears in an API answer, an audit record or the request log.
+- The audit log records an ISO timestamp and the client address.
+
+### Changed
+
+- The container console publishes an access link in its startup log. Open it once to receive the access cookie, or set `NET_PROXY_ACCESS_TOKEN` before starting Compose.
+- The audit log rotates at 5 MiB and keeps three generations; the console log rotates at 10 MiB.
+- The console warns at startup when the configuration file is readable by other accounts.
+- A configuration save that fails because another program holds the file is retried instead of reported.
+
+### Fixed
+
+- The recorded node account name no longer carries a trailing newline byte, so the console no longer believes that an unchanged account changed.
+
 ## [1.4.3]
 
 - The gateway wizard reports the final HTTPS outcome separately from TCP, proxy CONNECT and redirects. A TLS timeout after a redirect shows the failing host and leaves the final HTTP status empty.

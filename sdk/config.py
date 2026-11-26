@@ -1,10 +1,11 @@
-"""Shared on-disk configuration and gateway selection for every entry point."""
+"""Shared on-disk configuration, gateway selection and file helpers."""
 import ipaddress
 import json
 import os
 import re
 import sys
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -70,6 +71,67 @@ def data_dir():
     return config_path().parent / "data"
 
 
+def rotate_log(path, limit_bytes, keep=3):
+    """Keep at most `keep` previous generations of a log file.
+
+    The current file is renamed to `.1`, older generations shift up and the
+    oldest one is removed. Returns True when a rotation happened.
+    """
+    path = Path(path)
+    try:
+        if not path.exists() or path.stat().st_size < limit_bytes:
+            return False
+    except OSError:
+        return False
+    try:
+        oldest = path.with_name(path.name + "." + str(keep))
+        if oldest.exists():
+            oldest.unlink()
+        for index in range(keep - 1, 0, -1):
+            source = path.with_name(path.name + "." + str(index))
+            if source.exists():
+                source.replace(path.with_name(path.name + "." + str(index + 1)))
+        path.replace(path.with_name(path.name + ".1"))
+    except OSError as exc:
+        print("log rotation failed for {}: {}".format(path.name, type(exc).__name__), file=sys.stderr)
+        return False
+    return True
+
+
+def config_permission_warning(path=None):
+    """Describe a configuration file that other accounts can read, or None.
+
+    The message names the file and its mode. It never contains configuration
+    content, because the configuration holds passwords.
+    """
+    target = Path(path) if path else config_path()
+    try:
+        mode = target.stat().st_mode
+    except OSError:
+        return None
+    if os.name == "nt" or not mode & 0o077:
+        return None
+    return ("config-permissions: {} is mode {:04o}, so other accounts can read it. "
+            "Protect it with: chmod 600 {}").format(target, mode & 0o777, target)
+
+
+def replace_with_retry(source, target, attempts=5, delay=0.05):
+    """Replace a file, retrying while the platform reports that it is locked.
+
+    Windows reports a briefly locked destination as a permission error; a full
+    disk or a read-only directory fails differently and is raised at once.
+    """
+    last = None
+    for attempt in range(attempts):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError as exc:
+            last = exc
+            time.sleep(delay * (attempt + 1))
+    raise last
+
+
 def atomic_json(path, value):
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
@@ -85,7 +147,7 @@ def atomic_json(path, value):
             os.unlink(name)
             raise
     try:
-        os.replace(name, path)
+        replace_with_retry(name, path)
     finally:
         if os.path.exists(name):
             os.unlink(name)
