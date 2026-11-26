@@ -54,6 +54,18 @@
         <section class="card setup-card" aria-labelledby="setup-title">
           <div class="card-header"><h2 id="setup-title">连接你的 HTTP 代理</h2></div>
           <p>填写已运行的 HTTP 或 mixed 代理监听地址。控制台从运行它的机器发送请求，本机代理请填写 127.0.0.1。</p>
+          <div class="local-gateway-panel" id="local-gateway-panel">
+            <div class="local-gateway-text">
+              <strong>没有可用的代理？</strong>
+              <p>工具自带一个只监听本机的观测网关，可以立刻体验代理请求的完整过程。</p>
+            </div>
+            <div class="local-gateway-actions">
+              <button class="btn btn-secondary" id="local-gateway-start" type="button">启用本机观测网关</button>
+              <button class="btn btn-primary" id="local-gateway-demo" type="button">立即体验</button>
+              <button class="btn btn-secondary" id="local-gateway-stop" type="button" hidden>停止本机网关</button>
+            </div>
+            <div id="local-gateway-state" role="status" aria-live="polite"></div>
+          </div>
           <form id="setup-form">
             <fieldset id="setup-controls" disabled aria-label="网关与请求">
             <label class="setup-selection">选择操作<select id="setup-select" class="form-select"><option value="">新增网关</option></select></label>

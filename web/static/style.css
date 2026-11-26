@@ -1177,6 +1177,43 @@ body {
   color: var(--text-main);
 }
 
+.local-gateway-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.local-gateway-text strong {
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+.local-gateway-text p {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.local-gateway-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#local-gateway-state {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
 .action-dropdown-menu {
   display: none;
   /* Fixed, so that no table cell or card can cut the menu off. The script

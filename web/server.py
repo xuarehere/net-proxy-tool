@@ -42,11 +42,13 @@ from sdk.config import (DEFAULT_TEST_URL, VERSION, config_permission_warning, da
 from web import node_probe
 from web import node_baseline
 from web import diagnostics
+from web.local_gateway import LocalGateway
 from web.ssh_askpass import password_environment
 
 CONFIG_WRITE_LOCK = threading.RLock()
 REQUEST_TIMEOUT_SECONDS = 60
 MAX_JSON_BODY_BYTES = 1024 * 1024
+MAX_DRAIN_BYTES = 4 * 1024 * 1024
 MAX_SAFE_INTEGER = (1 << 53) - 1
 AUDIT_LOG_LIMIT_BYTES = 5 * 1024 * 1024
 AUDIT_LOG_GENERATIONS = 3
@@ -54,6 +56,8 @@ ACCESS_COOKIE_NAME = "npt_access"
 ACCESS_TOKEN_ENV = "NET_PROXY_ACCESS_TOKEN"
 # The console access state, resolved once when the server starts.
 ACCESS = {"token": "", "required": False, "printed": False}
+# The observation gateway the console owns.
+LOCAL_GATEWAY = {"instance": None, "record": None}
 
 
 class RequestError(ValueError):
@@ -320,6 +324,72 @@ def host_addresses():
         entries.append({"address": name, "loopback": is_loopback_client(name)})
     entries.append({"name": socket.gethostname().lower(), "loopback": False})
     return entries
+
+
+def local_gateway_state():
+    """The state of the observation gateway the console owns."""
+    instance = LOCAL_GATEWAY["instance"]
+    record = LOCAL_GATEWAY["record"]
+    running = bool(instance is not None and instance.running)
+    return {
+        "running": running,
+        "port": instance.port if running else (record or {}).get("port"),
+        "address": "127.0.0.1:{}".format(instance.port) if running else None,
+        "gateway": record,
+        "records": instance.records_list() if running else [],
+        "allowed_ports": sorted(instance.allowed_ports) if running else [],
+        "reachable": host_addresses(),
+    }
+
+
+def start_local_gateway():
+    """Start the observation gateway and return its configuration record."""
+    instance = LOCAL_GATEWAY["instance"]
+    if instance is not None and instance.running:
+        return LOCAL_GATEWAY["record"]
+    gateway = LocalGateway(port=0, allowed_ports=(80, 443))
+    port = gateway.start()
+    record = gateway.config_record()
+    record["port"] = port
+    LOCAL_GATEWAY["instance"] = gateway
+    LOCAL_GATEWAY["record"] = record
+    return record
+
+
+def stop_local_gateway():
+    """Stop the observation gateway and forget its record."""
+    instance = LOCAL_GATEWAY["instance"]
+    if instance is not None:
+        instance.stop()
+    LOCAL_GATEWAY["instance"] = None
+    LOCAL_GATEWAY["record"] = None
+
+
+def save_local_gateway_record(cfg, record):
+    """Add or refresh the local gateway record in the configuration."""
+    gateways = [item for item in cfg.get("gateways", []) if item.get("id") != record["id"]]
+    gateways.append(record)
+    cfg["gateways"] = gateways
+    if not cfg.get("active_gateway_id"):
+        cfg["active_gateway_id"] = record["id"]
+        for item in gateways:
+            item["is_default"] = item.get("id") == record["id"]
+    save_config(cfg)
+    return cfg
+
+
+def remove_local_gateway_record(cfg):
+    """Remove the local gateway record from the configuration."""
+    gateways = [item for item in cfg.get("gateways", []) if item.get("id") != "local-gateway"]
+    removed = len(gateways) != len(cfg.get("gateways", []))
+    cfg["gateways"] = gateways
+    if cfg.get("active_gateway_id") == "local-gateway":
+        cfg["active_gateway_id"] = gateways[0].get("id", "") if gateways else ""
+        for item in gateways:
+            item["is_default"] = item.get("id") == cfg["active_gateway_id"]
+    if removed:
+        save_config(cfg)
+    return cfg
 
 
 def resolve_access_token(bind_host):
@@ -912,8 +982,11 @@ def validate_client(target, cfg=None):
         validate_ssh_destination(host, target.get("ssh_user") or "root")
     if cfg is not None and target.get("bound_gateway_id"):
         bound = text_field(target["bound_gateway_id"], "bound_gateway_id", maximum=128)
-        if not resolve_gateway_info(cfg, bound):
+        gateway = resolve_gateway_info(cfg, bound)
+        if not gateway:
             raise ValueError("绑定的网关不存在，请重新选择并保存。")
+        if gateway.get("kind") == "local" and mode != "local":
+            raise ValueError("本机观测网关只监听回环地址，远程节点无法访问；请为远程节点选择可达的网关。")
     return target
 
 
@@ -1277,6 +1350,9 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
             raise RequestError(400, "Content-Length must be a non-negative integer")
         content_length = int(raw_length)
         if content_length > MAX_JSON_BODY_BYTES:
+            # Read and drop the body first, so that a client which is still
+            # sending can read the answer instead of a connection reset.
+            self.drain_body(content_length)
             self.close_connection = True
             raise RequestError(413, "请求体过大")
         if content_length == 0:
@@ -1292,6 +1368,18 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         if not isinstance(data, dict):
             raise RequestError(400, "请求体必须是 JSON 对象")
         return data
+
+    def drain_body(self, content_length):
+        """Read and drop a body that is too large, up to a bounded amount."""
+        remaining = min(int(content_length), MAX_DRAIN_BYTES)
+        try:
+            while remaining > 0:
+                chunk = self.rfile.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except OSError:
+            pass
 
     def parse_request(self):
         if not super().parse_request():
@@ -1375,6 +1463,10 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
             self.send_json({"addresses": addresses, "count": len(addresses)})
             return
 
+        if path == "/api/local-gateway":
+            self.send_json(local_gateway_state())
+            return
+
         if path == "/api/status":
             self.handle_api_status(parsed.query)
             return
@@ -1402,6 +1494,7 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
             "/api/gateways/add": self.handle_gateway_add,
             "/api/gateways/update": self.handle_gateway_update,
             "/api/gateways/delete": self.handle_gateway_delete,
+            "/api/local-gateway": self.handle_local_gateway,
             "/api/run": self.handle_api_run
         }
 
@@ -2034,6 +2127,28 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         save_config(cfg)
         self.send_json({"success": True, "message": "代理网关删除成功", "id": gid})
 
+    def handle_local_gateway(self):
+        """Start or stop the observation gateway the console owns."""
+        request = self.read_json_body()
+        action = request.get("action")
+        if action not in ("start", "stop"):
+            raise ValueError("action 必须是 start 或 stop")
+        with CONFIG_WRITE_LOCK:
+            cfg = load_config()
+            if action == "start":
+                record = start_local_gateway()
+                try:
+                    save_local_gateway_record(cfg, record)
+                except Exception:
+                    stop_local_gateway()
+                    raise
+            else:
+                stop_local_gateway()
+                remove_local_gateway_record(cfg)
+        self.write_audit("local_gateway_" + action, "-", "success", "本机观测网关已{}".format(
+            "启动" if action == "start" else "停止"))
+        self.send_json(local_gateway_state())
+
     def handle_api_run(self):
         payload = self.read_json_body()
         request = diagnostic_command(payload)
@@ -2069,6 +2184,16 @@ def run_server(port=None, bind=None):
     warning = config_permission_warning()
     if warning:
         print(warning, file=sys.stderr, flush=True)
+    if any(item.get("id") == "local-gateway" for item in cfg.get("gateways", [])):
+        # The operator kept the observation gateway, so it runs again with a fresh port.
+        try:
+            record = start_local_gateway()
+            save_local_gateway_record(load_config(), record)
+            print("net-proxy-tool | local observation gateway on 127.0.0.1:{}".format(record["port"]),
+                  flush=True)
+        except (OSError, ValueError) as exc:
+            print("net-proxy-tool | the local observation gateway did not start: {}".format(
+                type(exc).__name__), file=sys.stderr, flush=True)
     with ThreadingHTTPServer((host, port), ProxyConsoleHandler) as httpd:
         print(f"net-proxy-tool | http://{host}:{httpd.server_port}", flush=True)
         if required and not ACCESS["printed"]:

@@ -118,6 +118,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const topSaveNoproxyBtn = document.getElementById("top-save-noproxy-btn");
   const topNoproxyHint = document.getElementById("top-noproxy-hint");
 
+  // Local observation gateway Elements
+  const localGatewayStartBtn = document.getElementById("local-gateway-start");
+  const localGatewayDemoBtn = document.getElementById("local-gateway-demo");
+  const localGatewayStopBtn = document.getElementById("local-gateway-stop");
+  const localGatewayState = document.getElementById("local-gateway-state");
+
   // Audit Modal Elements
   const modalAudit = document.getElementById("modal-audit");
   const modalAuditClose = document.getElementById("modal-audit-close");
@@ -182,6 +188,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!res.ok) throw new Error("加载配置失败: " + res.status);
       appConfig = await res.json();
       renderAll();
+      loadLocalGatewayState();
       setupReady = true;
       setupControls.disabled = setupBusy;
       setupReload.hidden = true;
@@ -468,6 +475,67 @@ document.addEventListener("DOMContentLoaded", () => {
     } finally {
       if (revision === setupRevision) setupTest.disabled = false;
     }
+  });
+
+  async function renderLocalGatewayState(state) {
+    if (!state || !state.running) {
+      localGatewayStopBtn.hidden = true;
+      localGatewayStartBtn.hidden = false;
+      localGatewayDemoBtn.hidden = false;
+      localGatewayState.textContent = "";
+      return state;
+    }
+    localGatewayStopBtn.hidden = false;
+    localGatewayStartBtn.hidden = true;
+    localGatewayDemoBtn.hidden = true;
+    const seen = [...new Set((state.records || []).map(record => record.host + ":" + record.port))];
+    localGatewayState.textContent = "本机观测网关已启动：" + state.address +
+      (seen.length ? "\n已访问：" + seen.join(", ") : "\n尚未收到请求。");
+    return state;
+  }
+
+  async function loadLocalGatewayState() {
+    try {
+      const res = await fetch("/api/local-gateway");
+      if (!res.ok) throw new Error("无法读取本机网关状态");
+      return await renderLocalGatewayState(await res.json());
+    } catch (error) {
+      localGatewayState.textContent = error.message;
+      return null;
+    }
+  }
+
+  async function localGatewayAction(action) {
+    [localGatewayStartBtn, localGatewayDemoBtn, localGatewayStopBtn].forEach(btn => { btn.disabled = true; });
+    try {
+      const res = await fetch("/api/local-gateway", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "本机网关操作失败");
+      await renderLocalGatewayState(data);
+      await loadConfig();
+      return data;
+    } catch (error) {
+      localGatewayState.textContent = error.message;
+      return null;
+    } finally {
+      [localGatewayStartBtn, localGatewayDemoBtn, localGatewayStopBtn].forEach(btn => { btn.disabled = false; });
+    }
+  }
+
+  localGatewayStartBtn.addEventListener("click", () => localGatewayAction("start"));
+  localGatewayStopBtn.addEventListener("click", () => localGatewayAction("stop"));
+  localGatewayDemoBtn.addEventListener("click", async () => {
+    const state = await localGatewayAction("start");
+    if (!state || !state.gateway) return;
+    setupName.value = state.gateway.name || "本机观测网关";
+    setupHost.value = state.gateway.host || "127.0.0.1";
+    setupPort.value = String(state.gateway.port || "");
+    setupUrl.value = "https://example.com/";
+    setupTest.click();
   });
 
   function renderAll() {
