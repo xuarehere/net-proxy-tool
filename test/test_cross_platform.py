@@ -139,5 +139,36 @@ class LauncherTests(IsolatedTest):
                 thread.join()
 
 
+class DockerContextTests(unittest.TestCase):
+    def test_dockerignore_includes_every_runtime_file_copied_by_dockerfile(self):
+        rules = {
+            line.strip()
+            for line in (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        }
+        required = {
+            "sdk/__init__.py",
+            "sdk/config.py",
+            "sdk/proxy_session.py",
+            "web/__init__.py",
+            "web/server.py",
+            "web/ssh_askpass.py",
+            "web/node_baseline.py",
+            "web/node_probe.py",
+            "web/diagnostics.py",
+            "web/local_gateway.py",
+            "web/messages.py",
+            "web/session_switch.sh",
+            "web/container_helpers.sh",
+            "web/provision.sh",
+            "web/static/index.html",
+            "web/static/app.js",
+            "web/static/i18n.js",
+            "web/static/style.css",
+        }
+        missing = sorted(path for path in required if "!" + path not in rules)
+        self.assertEqual(missing, [])
+
+
 if __name__ == "__main__":
     unittest.main()

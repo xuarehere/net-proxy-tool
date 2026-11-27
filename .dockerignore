@@ -13,6 +13,9 @@ web/**
 !web/ssh_askpass.py
 !web/node_baseline.py
 !web/node_probe.py
+!web/diagnostics.py
+!web/local_gateway.py
+!web/messages.py
 !web/session_switch.sh
 !web/container_helpers.sh
 !web/provision.sh
@@ -20,4 +23,5 @@ web/**
 web/static/**
 !web/static/index.html
 !web/static/app.js
+!web/static/i18n.js
 !web/static/style.css
