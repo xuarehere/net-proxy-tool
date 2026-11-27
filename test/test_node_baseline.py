@@ -76,11 +76,13 @@ class LoginBaselineTests(unittest.TestCase):
                 self.assertEqual(verified['verification_scope'], 'login_and_managed_files')
                 self.assertEqual(profile.read_bytes(), original)
 
-    def test_completed_legacy_restore_retries_verification_without_running_off_again(self):
+    def test_completed_legacy_restore_strips_tool_blocks_and_retries_verification(self):
         profile = self.write('.profile', '# --- NET-PROXY-TOOL-START ---\n'
                              'export HTTP_PROXY="http://old.invalid:3128"\n'
-                             '# --- NET-PROXY-TOOL-END ---\n')
-        original = profile.read_bytes()
+                             '# --- NET-PROXY-TOOL-END ---\n# user keep\n')
+        baseline = self.capture()
+        self.assertTrue(baseline['managed']['legacy_residual']['any'])
+        self.assertTrue(baseline['managed']['legacy_residual']['profile_markers'])
         target = dict(self.target, host='fixture.invalid', port=2222, ssh_user='tester',
                       identity_version=1, lifecycle_version=1, access_mode='ssh', bound_gateway_id='g')
         cfg = {'clients': [target], 'gateways': [dict(self.gateway, id='g')]}
@@ -110,7 +112,10 @@ class LoginBaselineTests(unittest.TestCase):
         self.assertEqual([first['returncode'], second['returncode']], [1, 0])
         self.assertEqual(mutations, ['on', 'off'])
         self.assertEqual(len(verifications), 2)
-        self.assertEqual(profile.read_bytes(), original)
+        self.assertEqual(profile.read_text(), '# user keep\n')
+        after = self.capture()
+        self.assertFalse(after['managed']['legacy_residual']['any'])
+        self.assertFalse(after['login']['proxy_variables']['HTTP_PROXY']['present'])
         self.assertEqual(target['managed_state'], 'disabled')
         self.assertNotIn('_node_baseline', target)
 

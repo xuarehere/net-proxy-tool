@@ -53,6 +53,62 @@ def listener(handler):
             thread.join()
 
 
+def check_wizard_theme_contrast(browser, url):
+    """Ensure the expanded wizard banner and stepper pipeline stay legible in light and dark modes."""
+    for theme in ("light", "dark"):
+        page = browser.new_page(color_scheme=theme, viewport={"width": 1280, "height": 840})
+        page.goto(url)
+        page.locator("#advanced-wizard > summary").click()
+        metrics = page.evaluate("""() => {
+            function parseRgb(str) {
+                const m = str && str.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
+                return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+            }
+            function bgSample(el) {
+                let cur = el;
+                while (cur) {
+                    const st = getComputedStyle(cur);
+                    const img = st.backgroundImage || "";
+                    const grad = img.match(/rgba?\\(\\d+,\\s*\\d+,\\s*\\d+[^)]*\\)|#[0-9a-fA-F]{3,8}/g);
+                    if (grad && grad.length) {
+                        const tmp = document.createElement("span");
+                        tmp.style.color = grad[0];
+                        document.body.appendChild(tmp);
+                        const resolved = parseRgb(getComputedStyle(tmp).color);
+                        tmp.remove();
+                        if (resolved) return resolved;
+                    }
+                    const bg = st.backgroundColor;
+                    if (bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") {
+                        const parsed = parseRgb(bg);
+                        if (parsed) return parsed;
+                    }
+                    cur = cur.parentElement;
+                }
+                return [255, 255, 255];
+            }
+            function lum([r, g, b]) {
+                return [r, g, b].map(v => {
+                    v /= 255;
+                    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+                }).reduce((acc, c, i) => acc + c * [0.2126, 0.7152, 0.0722][i], 0);
+            }
+            return ["#advanced-wizard .wizard-header-banner h2",
+                    "#advanced-wizard .wizard-header-banner p",
+                    "#advanced-wizard .pipe-name"].map(sel => {
+                const el = document.querySelector(sel);
+                const fg = parseRgb(getComputedStyle(el).color);
+                const bg = bgSample(el);
+                const l1 = lum(fg), l2 = lum(bg);
+                const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+                return { sel, fg, bg, ratio };
+            });
+        }""")
+        page.close()
+        for item in metrics:
+            assert item["ratio"] >= 4.5, f"{theme} contrast too low for {item['sel']}: {item}"
+
+
 def public_home(browser, url, screenshot):
     for theme, width in [("light", 1280), ("dark", 1280), ("light", 390), ("dark", 390)]:
         page = browser.new_page(color_scheme=theme, viewport={"width": width, "height": 840})
@@ -225,6 +281,7 @@ def run(screenshot=None):
                           for name, host in [("node-one", "192.0.2.1"), ("node-two", "192.0.2.2")]]
         save_config(cfg)
         page.reload()
+        check_wizard_theme_contrast(browser, url)
         form("advanced-wizard").locator(":scope > summary").click()
         form("wizard-gw-select").select_option(gateways[1].gateway_id)
         form("wizard-test-url").fill(START)

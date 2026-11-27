@@ -62,7 +62,40 @@ case "$NPT_BASELINE_SHELL" in */zsh) record file "${ZDOTDIR:-$HOME}/.zprofile" ;
 if [ "$(id -u)" = 0 ]; then
     for file in /etc/pip.conf /etc/gitconfig; do record file "$file"; done
     if [ -d /etc/apt/apt.conf.d ]; then record file /etc/apt/apt.conf.d/99net-proxy; fi
+    if [ -f /.dockerenv ]; then
+        for file in /etc/wgetrc /etc/environment /etc/profile.d/net-proxy.sh; do record file "$file"; done
+    fi
 fi
+res_switch=false
+if [ -e "$HOME/.net-proxy-switch.sh" ] && [ ! -e "$HOME/.local/state/net-proxy-tool/env/applied" ]; then res_switch=true; fi
+res_profile=false
+for lf in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile" "$HOME/.bash_login" "${ZDOTDIR:-$HOME}/.zprofile"; do
+    [ -f "$lf" ] || continue
+    if grep -qsF 'NET-PROXY-TOOL-START' "$lf" 2>/dev/null ||
+       { grep -qsF '.net-proxy-switch.sh' "$lf" 2>/dev/null && [ ! -e "$HOME/.local/state/net-proxy-tool/env/applied" ]; }; then
+        res_profile=true; break
+    fi
+done
+res_etc_proxy_sh=false
+for ef in /etc/profile.d/net-proxy.sh /etc/profile.d/net-proxy-switch.sh; do
+    if [ -f "$ef" ] && grep -qsF 'net-proxy-tool' "$ef" 2>/dev/null && [ ! -e "$HOME/.local/state/net-proxy-tool/etc-profile-d/applied" ]; then
+        res_etc_proxy_sh=true; break
+    fi
+done
+res_etc_env=false
+for ef in /etc/environment /etc/bash.bashrc /etc/profile /etc/curlrc /etc/wgetrc /etc/pip.conf /etc/apt/apt.conf.d/99net-proxy; do
+    [ -f "$ef" ] || continue
+    if grep -qsF 'NET-PROXY-TOOL-START' "$ef" 2>/dev/null || grep -qsF 'net-proxy-tool' "$ef" 2>/dev/null; then
+        if [ "$ef" = /etc/environment ] && [ -e "$HOME/.local/state/net-proxy-tool/etc-env/applied" ]; then continue; fi
+        if [ "$ef" = /etc/wgetrc ] && [ -e "$HOME/.local/state/net-proxy-tool/system-wget/applied" ]; then continue; fi
+        if [ "$ef" = /etc/apt/apt.conf.d/99net-proxy ] && [ -e "$HOME/.local/state/net-proxy-tool/apt/applied" ]; then continue; fi
+        res_etc_env=true; break
+    fi
+done
+emit res.switch_file "$res_switch"
+emit res.profile_markers "$res_profile"
+emit res.etc_proxy_sh "$res_etc_proxy_sh"
+emit res.etc_environment "$res_etc_env"
 state="$HOME/.local/state/net-proxy-tool"
 emit state_exists "$([ -d "$state" ] && echo true || echo false)"
 if [ -L "$state" ]; then emit unsafe_state true; exit 0; fi
@@ -72,7 +105,7 @@ if [ -f "$state/owner-uid" ]; then emit owner_uid "$(cat "$state/owner-uid")"; f
 if [ -f "$state/snapshot-id" ]; then emit snapshot_id "$(cat "$state/snapshot-id")"; fi
 if [ -f "$state/owner-node-id" ]; then emit owner_node_id "$(cat "$state/owner-node-id")"; fi
 if [ -d "$state/lock" ]; then emit locked true; fi
-for key in curlrc curl-active wgetrc pip git env .bashrc .profile .bash_profile .bash_login zprofile system-curl system-pip system-git apt; do
+for key in curlrc curl-active wgetrc pip git env .bashrc .profile .bash_profile .bash_login zprofile system-curl system-pip system-git apt system-wget etc-profile-d etc-env; do
     dir="$state/$key"
     [ -d "$dir" ] || continue
     emit "statedir.$key" "$(metadata "$dir")"
@@ -204,6 +237,13 @@ def capture_node_baseline(target, runner, gateway=None, *, _extra_paths=()):
         owner = values.get('owner_uid')
         if owner and int(owner) != identity['uid']:
             state = 'conflict'
+        residual = {
+            'switch_file': values.get('res.switch_file') == 'true',
+            'profile_markers': values.get('res.profile_markers') == 'true',
+            'etc_proxy_sh': values.get('res.etc_proxy_sh') == 'true',
+            'etc_environment': values.get('res.etc_environment') == 'true',
+        }
+        residual['any'] = any(residual.values())
         return {'ok': True, 'version': 1, 'execution_identity': identity,
                 'login': {'context': 'fresh_login_shell', 'proxy_variables': env, 'curl': curl},
                 'files': files,
@@ -215,6 +255,7 @@ def capture_node_baseline(target, runner, gateway=None, *, _extra_paths=()):
                 'managed': {'state': state, 'owner_uid': int(owner) if owner else None,
                             'snapshot_id': values.get('snapshot_id'),
                             'owner_node_id': values.get('owner_node_id'),
+                            'legacy_residual': residual,
                             'restoration_manifest': restoration}}
     except Exception:
         # Transport diagnostics belong to the existing authentication layer.
@@ -230,26 +271,36 @@ def verify_node_baseline(target, baseline, runner, gateway=None):
     """Compare observations; HTTP reachability never proves restoration."""
     old_managed = (baseline or {}).get('managed', {})
     previous_active = old_managed.get('state') in ('enabled', 'partial', 'conflict')
+    previous_residual = bool(old_managed.get('legacy_residual', {}).get('any'))
     expected = old_managed.get('restoration_manifest', {}) if previous_active else (baseline or {}).get('files', {})
     observation = capture_node_baseline(target, runner, gateway, _extra_paths=tuple(expected))
     unknown = {'verified': False, 'status': 'unknown', 'verification_scope': 'unavailable',
                'checks': {}, 'observation': observation}
     if not baseline or not baseline.get('ok') or not observation.get('ok'):
         return unknown
-    if not expected:
+    if not expected and not previous_residual:
         return unknown
+    obs_residual = bool(observation.get('managed', {}).get('legacy_residual', {}).get('any'))
     checks = {'identity': baseline['execution_identity'] == observation['execution_identity'],
-              'managed_files': all(observation['files'].get(path) == expected_file
-                                   for path, expected_file in expected.items()),
-              'managed_disabled': observation['managed']['state'] == 'disabled'}
-    scope = 'managed_files_only' if previous_active else 'login_and_managed_files'
-    if not previous_active:
-        def comparable_env(value):
-            return {key: {k: v for k, v in item.items() if k != 'matches_selected_gateway'}
-                    for key, item in value['login']['proxy_variables'].items()}
-        checks['proxy_environment'] = comparable_env(baseline) == comparable_env(observation)
-        checks['curl_configuration'] = baseline['login']['curl'] == observation['login']['curl']
-        checks['state_metadata'] = baseline.get('state_baseline') == observation.get('state_baseline')
+              'managed_disabled': observation['managed']['state'] == 'disabled',
+              'no_legacy_residual': not obs_residual}
+    if previous_residual and not previous_active:
+        scope = 'legacy_cleanup_only'
+        home = (baseline.get('execution_identity') or {}).get('home', '')
+        if home:
+            switch_path = home.rstrip('/') + '/.net-proxy-switch.sh'
+            checks['managed_files'] = observation.get('files', {}).get(switch_path, {}).get('status') in (None, 'absent')
+    else:
+        checks['managed_files'] = all(observation.get('files', {}).get(path) == expected_file
+                                      for path, expected_file in expected.items())
+        scope = 'managed_files_only' if previous_active else 'login_and_managed_files'
+        if not previous_active:
+            def comparable_env(value):
+                return {key: {k: v for k, v in item.items() if k != 'matches_selected_gateway'}
+                        for key, item in value['login']['proxy_variables'].items()}
+            checks['proxy_environment'] = comparable_env(baseline) == comparable_env(observation)
+            checks['curl_configuration'] = baseline['login']['curl'] == observation['login']['curl']
+            checks['state_metadata'] = baseline.get('state_baseline') == observation.get('state_baseline')
     verified = all(checks.values())
     return {'verified': verified, 'status': 'restored' if verified else 'changed',
             'verification_scope': scope, 'checks': checks, 'observation': observation}

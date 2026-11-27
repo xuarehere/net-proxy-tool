@@ -529,6 +529,45 @@ class NodeLifecycleTests(unittest.TestCase):
         self.assertIn('_node_restored_baseline', saved)
         self.assertNotIn('_node_restored_baseline', self.api('/api/config')['clients'][0])
 
+    def test_legacy_residual_forces_off_cleanup_even_without_baseline_or_on_repeat_off(self):
+        node = self.add(id='legacy-residual-node')
+        cfg = load_config()
+        cfg['clients'][0].pop('lifecycle_version', None)
+        residual = {'ok': True, 'execution_identity': {'uid': 1000, 'user': 'tester', 'home': '/home/tester', 'shell': '/bin/sh'},
+                    'managed': {'state': 'disabled', 'legacy_residual': {'any': True, 'profile_markers': True}},
+                    'login': {'proxy_variables': matching_login()['proxy_variables'], 'curl': {'path': '/home/tester/.curlrc', 'status': 'absent'}}}
+        clean = {'ok': True, 'execution_identity': {'uid': 1000, 'user': 'tester', 'home': '/home/tester', 'shell': '/bin/sh'},
+                 'managed': {'state': 'disabled', 'legacy_residual': {'any': False}},
+                 'login': {'proxy_variables': {k: {'present': False} for k in ('http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY')},
+                           'curl': {'path': '/home/tester/.curlrc', 'status': 'absent'}}}
+        clean_verification = {'verified': True, 'status': 'restored', 'verification_scope': 'login_and_managed_files',
+                              'checks': {'identity': True, 'managed_files': True, 'managed_disabled': True},
+                              'observation': clean}
+        with patch.object(server.node_baseline, 'capture_node_baseline', return_value=residual), \
+                patch.object(server.node_baseline, 'verify_node_baseline', return_value=clean_verification), \
+                patch.object(server, 'run_node_script', return_value=subprocess.CompletedProcess([], 0, '', '')) as execute:
+            result = server.apply_node_proxy(cfg['clients'][0], 'off', cfg)
+        self.assertEqual(result['returncode'], 0)
+        self.assertEqual(result['managed_state'], 'disabled')
+        execute.assert_called_once()
+
+    def test_persistent_legacy_residual_after_off_fails_instead_of_claiming_disabled(self):
+        node = self.active(id='persistent-residual')
+        residual_obs = {'ok': True, 'execution_identity': node['_node_baseline']['execution_identity'],
+                        'managed': {'state': 'enabled', 'legacy_residual': {'any': True, 'profile_markers': True}},
+                        'login': matching_login()}
+        failed_verification = {'verified': False, 'status': 'changed', 'verification_scope': 'login_and_managed_files',
+                               'checks': {'identity': True, 'managed_files': False, 'managed_disabled': False},
+                               'observation': residual_obs}
+        cfg = load_config()
+        with patch.object(server.node_baseline, 'capture_node_baseline', return_value=residual_obs), \
+                patch.object(server.node_baseline, 'verify_node_baseline', return_value=failed_verification), \
+                patch.object(server, 'run_node_script', return_value=subprocess.CompletedProcess([], 0, '', '')) as execute:
+            result = server.apply_node_proxy(cfg['clients'][0], 'off', cfg)
+        self.assertNotEqual(result['returncode'], 0)
+        self.assertEqual(result['managed_state'], 'unknown')
+        execute.assert_called_once()
+
     def test_failed_journal_or_baseline_read_prevents_configuration_write(self):
         node = self.add(id='journal-failure')
         for baseline in ({'ok': False}, {'ok': True, 'managed': {'state': 'disabled'}}):

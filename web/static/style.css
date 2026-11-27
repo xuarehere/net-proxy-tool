@@ -26,6 +26,11 @@
   --radius-lg: 12px;
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   --transition: all 0.2s ease-in-out;
+  --wizard-banner-bg: linear-gradient(135deg, #131b2e 0%, #172554 100%);
+  --pipeline-bg: rgba(11, 17, 32, 0.7);
+  --feedback-bg: rgba(15, 23, 42, 0.85);
+  --toolbar-bg: rgba(15, 23, 42, 0.4);
+  --input-focus-bg: rgba(15, 23, 42, 0.8);
 }
 
 * {
@@ -335,7 +340,7 @@ body {
 /* TAB 1: 接入向导 4 步渐进流水线 (Stepper & Pipeline)             */
 /* ============================================================== */
 .wizard-header-banner {
-  background: linear-gradient(135deg, #131b2e 0%, #172554 100%);
+  background: var(--wizard-banner-bg);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   padding: 22px;
@@ -359,7 +364,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: rgba(11, 17, 32, 0.7);
+  background: var(--pipeline-bg);
   padding: 12px 20px;
   border-radius: var(--radius);
   border: 1px solid var(--border-color);
@@ -1051,7 +1056,7 @@ body {
 
 .status-capsule.off {
   border-color: rgba(148, 163, 184, 0.25);
-  background: rgba(15, 23, 42, 0.4);
+  background: var(--toolbar-bg);
 }
 
 .capsule-indicator {
@@ -1281,7 +1286,7 @@ body {
 /* 模态框子面板与提示 */
 /* ============================================================== */
 .access-subpanel {
-  background: rgba(15, 23, 42, 0.4);
+  background: var(--toolbar-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 12px 14px 6px 14px;
@@ -1586,7 +1591,7 @@ body {
 }
 
 .live-feedback-box {
-  background: rgba(15, 23, 42, 0.85);
+  background: var(--feedback-bg);
   border: 1px solid var(--border-light);
   border-radius: 8px;
   padding: 14px 18px;
@@ -1692,7 +1697,7 @@ body {
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  background: rgba(15, 23, 42, 0.4);
+  background: var(--toolbar-bg);
   border-bottom: 1px solid var(--border-color);
   flex-wrap: wrap;
 }
@@ -1724,7 +1729,7 @@ body {
 .search-input:focus {
   outline: none;
   border-color: var(--primary);
-  background: rgba(15, 23, 42, 0.8);
+  background: var(--input-focus-bg);
 }
 
 .filter-box {
@@ -1840,8 +1845,13 @@ body {
     --text-dim: #52647b; --primary: #075985; --primary-hover: #0369a1;
     --success: #047857; --danger: #b91c1c; --warning: #92400e;
     --shadow: 0 3px 14px rgba(30, 50, 80, .09);
+    --wizard-banner-bg: linear-gradient(135deg, #eff6ff 0%, #e0e7ff 100%);
+    --pipeline-bg: #ffffff;
+    --feedback-bg: #f8fafc;
+    --toolbar-bg: #f1f5f9;
+    --input-focus-bg: #ffffff;
   }
-  .btn-primary { color: white; }
+  .btn-primary, .pipeline-step.active .pipe-num { color: white; }
   .terminal-view, .code-delivery-card pre { color: #e2e8f0; }
 }
 

@@ -1,67 +1,196 @@
-<svg xmlns="http://www.w3.org/2000/svg" lang="zh" viewBox="0 0 1112 650" role="img" aria-labelledby="title desc">
-<title id="title">控制台如何配置节点，应用如何发出请求</title><desc id="desc">虚线为管理路径。CLI 或 SDK 也能独立配置本机任务。实线为应用通过已有 HTTP 代理访问目标服务的路径。</desc>
+<svg xmlns="http://www.w3.org/2000/svg" lang="zh" viewBox="0 0 1380 770" width="1380" height="770" role="img" aria-labelledby="arch-title arch-desc">
+<title id="arch-title">net-proxy-tool v1.5.0 — 控制流与代理流量全景架构</title>
+<desc id="arch-desc">虚线表示管理配置、节点编排与只读 MCP 诊断；实线表示隔离后的应用流量经 HTTP 代理网关到达目标服务。</desc>
 <defs>
-  <marker id="ctrl-end" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="#566883"/></marker>
-  <marker id="flow-end" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="#137568"/></marker>
+  <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#f8fafc"/>
+    <stop offset="100%" stop-color="#f1f5f9"/>
+  </linearGradient>
+  <linearGradient id="hero-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#0f5149"/>
+    <stop offset="100%" stop-color="#136a5f"/>
+  </linearGradient>
+  <linearGradient id="dest-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+    <stop offset="0%" stop-color="#ecfdf5"/>
+    <stop offset="100%" stop-color="#d1fae5"/>
+  </linearGradient>
+  <filter id="card-shadow" x="-4%" y="-6%" width="108%" height="116%">
+    <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.06"/>
+  </filter>
+  <marker id="ctrl-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+    <path d="M1,1 L7,4 L1,7 Z" fill="#4f46e5"/>
+  </marker>
+  <marker id="flow-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+    <path d="M1,1 L7,4 L1,7 Z" fill="#0f766e"/>
+  </marker>
+  <marker id="obs-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+    <path d="M1,1 L6,3.5 L1,6 Z" fill="#d97706"/>
+  </marker>
 </defs>
 <style>
-  text {font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;fill:#163d40}
-  .title {font-size:34px;font-weight:700} .section {font-size:20px;font-weight:650;fill:#446361}
-  .node {font-size:25px;font-weight:660} .detail {font-size:17px;fill:#40585b}
-  .route {font-size:16px;font-weight:600;fill:#455971} .light {font-size:25px;font-weight:700;fill:white}
-  .subtle {font-size:18px;fill:#dcf3ed} .legend {font-size:18px;fill:#3d565c}
-  .ctrl,.flow {fill:none;stroke-linejoin:round;stroke-linecap:round;stroke-width:2.6}
-  .ctrl {stroke:#566883;stroke-dasharray:5 5} .flow {stroke:#137568;stroke-width:3}
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .title { font-size: 24px; font-weight: 800; fill: #0f172a; letter-spacing: -0.3px; }
+  .subtitle { font-size: 13.5px; font-weight: 400; fill: #475569; }
+  .col-hdr { font-size: 12px; font-weight: 700; fill: #475569; letter-spacing: 0.7px; }
+  .legend-txt { font-size: 12.5px; font-weight: 600; fill: #334155; }
+  .card-title { font-size: 15px; font-weight: 700; fill: #0f172a; }
+  .card-sub { font-size: 12px; font-weight: 500; fill: #475569; }
+  .card-bullet { font-size: 11.5px; font-weight: 450; fill: #334155; }
+  .hero-title { font-size: 16px; font-weight: 700; fill: #ffffff; }
+  .hero-sub { font-size: 12px; font-weight: 500; fill: #ccfbf1; }
+  .hero-bullet { font-size: 11.5px; font-weight: 500; fill: #ecfdf5; }
+  .badge-txt { font-size: 10.5px; font-weight: 700; letter-spacing: 0.4px; }
+  .route-lbl { font-size: 11px; font-weight: 700; fill: #4338ca; }
+  .foot-txt { font-size: 11.5px; font-weight: 500; fill: #475569; }
+  .ctrl-line { fill: none; stroke: #4f46e5; stroke-width: 2; stroke-dasharray: 5 4; stroke-linecap: round; stroke-linejoin: round; }
+  .flow-line { fill: none; stroke: #0f766e; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+  .obs-line { fill: none; stroke: #d97706; stroke-width: 2; stroke-dasharray: 4 3; stroke-linecap: round; stroke-linejoin: round; }
 </style>
-<rect x="0" y="0" width="1112" height="650" rx="12" fill="#f8faf7" stroke="none"/>
-<text x="32" y="57" class="title">控制台如何配置节点，应用如何发出请求</text>
-<path d="M33 95h44" class="ctrl" marker-end="url(#ctrl-end)"/>
-<text x="91" y="101" class="legend">配置与管理</text>
-<path d="M262 95h44" class="flow" marker-end="url(#flow-end)"/>
-<text x="320" y="101" class="legend">应用请求</text>
-<path d="M32 128h1048" stroke="#cfddda"/>
-<text x="32" y="168" class="section">入口</text>
-<text x="408" y="168" class="section">执行任务的位置</text>
-<text x="857" y="168" class="section">网络出口</text>
-<rect x="32" y="193" width="263" height="86" rx="12" fill="#e8eaf1" stroke="none"/>
-<text x="50" y="228" class="node">CLI / Python SDK / MCP 服务器</text>
-<text x="50" y="255" class="detail">可独立使用</text>
-<path d="M297 222H397" class="ctrl" marker-end="url(#ctrl-end)"/>
-<rect x="32" y="315" width="263" height="80" rx="12" fill="#e8eaf1" stroke="none"/>
-<text x="50" y="349" class="node">浏览器</text>
-<text x="50" y="376" class="detail">本机访问或 SSH 隧道</text>
-<path d="M160 398v40" class="ctrl" marker-end="url(#ctrl-end)"/>
-<rect x="32" y="449" width="263" height="93" rx="12" fill="#e8eaf1" stroke="none"/>
-<text x="50" y="488" class="node">Web 控制台</text>
-<text x="50" y="517" class="detail">网关配置、诊断与节点管理</text>
-<path d="M297 493H316V260H397" class="ctrl" marker-end="url(#ctrl-end)"/>
-<text x="328" y="252" class="route">启动任务</text>
-<path d="M316 359H397" class="ctrl" marker-end="url(#ctrl-end)"/>
-<text x="338" y="349" class="route">SSH</text>
-<path d="M316 493H397" class="ctrl" marker-end="url(#ctrl-end)"/>
-<text x="338" y="483" class="route">SSH</text>
-<rect x="408" y="193" width="329" height="86" rx="12" fill="#e1eeea" stroke="none"/>
-<text x="428" y="228" class="node">本机任务</text>
-<text x="428" y="255" class="detail">本机应用 / 子进程</text>
-<rect x="408" y="309" width="329" height="108" rx="12" fill="#e1eeea" stroke="none"/>
-<text x="428" y="344" class="node">Linux 节点</text>
-<text x="428" y="372" class="detail">SSH 直连目标账号</text>
-<text x="428" y="397" class="detail">该账号运行的应用进程</text>
-<rect x="408" y="448" width="329" height="173" rx="12" fill="#eef4ef" stroke="#96aea6"/>
-<text x="428" y="483" class="node">Docker 宿主机</text>
-<path d="M442 494v24" class="ctrl" marker-end="url(#ctrl-end)"/>
-<text x="462" y="512" class="route">docker exec</text>
-<rect x="427" y="526" width="291" height="78" rx="12" fill="#d9e9e2" stroke="none"/>
-<text x="445" y="558" class="node">目标容器</text>
-<text x="445" y="585" class="detail">容器内的应用进程</text>
-<path d="M739 235H794V561H720" class="flow"/>
-<path d="M739 361H846" class="flow" marker-end="url(#flow-end)"/>
-<circle cx="794" cy="361" r="4.5" fill="#137568"/>
-<rect x="857" y="312" width="223" height="97" rx="12" fill="#146258" stroke="none"/>
-<text x="877" y="354" class="light">HTTP 代理网关</text>
-<text x="877" y="383" class="subtle">由用户提供或工具内置本机网关</text>
-<path d="M966 412v74" class="flow" marker-end="url(#flow-end)"/>
-<rect x="857" y="498" width="223" height="95" rx="12" fill="#d9eae4" stroke="none"/>
-<text x="877" y="538" class="node">目标服务</text>
-<text x="877" y="566" class="detail">HTTP / HTTPS</text>
+<rect x="0" y="0" width="1380" height="770" rx="16" fill="url(#bg-grad)"/>
+<rect x="1" y="1" width="1378" height="768" rx="15" fill="none" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="36" y="42" class="title">net-proxy-tool v1.5.0 — 控制流与代理流量全景架构</text>
+<text x="36" y="66" class="subtitle">虚线表示管理配置、节点编排与只读 MCP 诊断；实线表示隔离后的应用流量经 HTTP 代理网关到达目标服务。</text>
+<rect x="36" y="82" width="790" height="32" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+<path d="M52 98h30" class="ctrl-line" marker-end="url(#ctrl-arrow)"/>
+<text x="90" y="102" class="legend-txt">管理下发 / 只读 MCP 控制流</text>
+<path d="M318 98h30" class="flow-line" marker-end="url(#flow-arrow)"/>
+<text x="356" y="102" class="legend-txt">隔离后的 HTTP(S) 代理流量</text>
+<rect x="556" y="90" width="14" height="14" rx="3" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+<text x="578" y="102" class="legend-txt">基线快照与干净登录态复核</text>
+<rect x="36" y="130" width="304" height="560" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-opacity="0.7" fill-opacity="0.65"/>
+<text x="50" y="152" class="col-hdr">1. 接入与控制入口</text>
+<rect x="428" y="130" width="384" height="560" rx="14" fill="#f8fafc" stroke="#cbd5e1" stroke-opacity="0.7" fill-opacity="0.65"/>
+<text x="442" y="152" class="col-hdr">2. 零污染执行隔离边界</text>
+<rect x="866" y="130" width="320" height="560" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-opacity="0.7" fill-opacity="0.65"/>
+<text x="880" y="152" class="col-hdr">3. 代理网关与对比探测</text>
+<text x="1228" y="152" class="col-hdr">4. 目标服务</text>
+<g filter="url(#card-shadow)">
+<rect x="50" y="170" width="276" height="72" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+<circle cx="72" cy="196" r="12" fill="#e0e7ff"/>
+<text x="72" y="201" text-anchor="middle" font-size="13" fill="#4338ca" font-weight="700">UI</text>
+<text x="94" y="198" class="card-title">操作者浏览器</text>
+<text x="94" y="220" class="card-sub">本机回环地址或 SSH 端口转发</text>
+</g>
+<path d="M188 242v28" class="ctrl-line" marker-end="url(#ctrl-arrow)"/>
+<g filter="url(#card-shadow)">
+<rect x="50" y="276" width="276" height="106" rx="10" fill="#eef2ff" stroke="#818cf8" stroke-width="1.5"/>
+<text x="64" y="302" class="card-title">Web 控制台</text>
+<rect x="242" y="286" width="72" height="20" rx="10" fill="#4f46e5"/>
+<text x="278" y="300" text-anchor="middle" class="badge-txt" fill="#ffffff">唯一写入口</text>
+<text x="64" y="328" class="card-sub">web/server.py · 网关、探针与节点管理</text>
+<text x="64" y="358" class="card-bullet">web/local_gateway.py · diagnostics.py</text>
+</g>
+<g filter="url(#card-shadow)">
+<rect x="50" y="408" width="276" height="104" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="64" y="434" class="card-title">CLI 与 Python SDK</text>
+<rect x="242" y="418" width="72" height="20" rx="10" fill="#0f766e" fill-opacity="0.14"/>
+<text x="278" y="432" text-anchor="middle" class="badge-txt" fill="#0f766e">局部作用域</text>
+<text x="64" y="460" class="card-sub">with-proxy · with ProxySession():</text>
+<text x="64" y="488" class="card-bullet">with_proxy.py · sdk/proxy_session.py</text>
+</g>
+<g filter="url(#card-shadow)">
+<rect x="50" y="538" width="276" height="122" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-dasharray="4 2"/>
+<text x="64" y="564" class="card-title">MCP 编程代理接口</text>
+<rect x="238" y="548" width="76" height="20" rx="10" fill="#fef3c7" stroke="#d97706"/>
+<text x="276" y="562" text-anchor="middle" class="badge-txt" fill="#92400e">只读诊断</text>
+<text x="64" y="590" class="card-sub">net_proxy_mcp.py · 6 项只读诊断工具</text>
+<text x="64" y="618" class="card-bullet">供 Kiro / Agent 调用 · 严禁写入配置</text>
+<text x="64" y="638" class="card-bullet">list_gateways · check_* · run_with_proxy</text>
+</g>
+<g filter="url(#card-shadow)">
+<rect x="446" y="170" width="348" height="144" rx="10" fill="#ffffff" stroke="#0f766e" stroke-width="1.5"/>
+<rect x="446" y="170" width="6" height="144" rx="3" fill="#0f766e"/>
+<text x="466" y="196" class="card-title">本机沙箱子进程</text>
+<text x="466" y="218" class="card-sub">父进程与系统代理设置保持零改动</text>
+<line x1="466" y1="232" x2="778" y2="232" stroke="#e2e8f0"/>
+<text x="466" y="256" class="card-bullet">• HTTP_PROXY / NO_PROXY 仅限子进程或代码块</text>
+<text x="466" y="280" class="card-bullet">• 超时或退出后完整终止进程树并清理现场</text>
+</g>
+<g filter="url(#card-shadow)">
+<rect x="446" y="334" width="348" height="144" rx="10" fill="#ffffff" stroke="#d97706" stroke-width="1.5"/>
+<rect x="446" y="334" width="6" height="144" rx="3" fill="#d97706"/>
+<text x="466" y="360" class="card-title">Linux 远程节点 (指定账号)</text>
+<text x="466" y="382" class="card-sub">写入配置前先捕获文件与权限快照</text>
+<line x1="466" y1="396" x2="778" y2="396" stroke="#e2e8f0"/>
+<text x="466" y="420" class="card-bullet">• 快照存于 ~/.local/state/net-proxy-tool/</text>
+<text x="466" y="444" class="card-bullet">• 关闭后在新开 login shell 逐项核验恢复</text>
+</g>
+<g filter="url(#card-shadow)">
+<rect x="446" y="498" width="348" height="174" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="1.5"/>
+<text x="464" y="524" class="card-title">Docker 宿主机</text>
+<text x="464" y="544" class="card-sub">经宿主机穿透，仅操作指定的目标容器</text>
+<path d="M482 552v26" class="ctrl-line" marker-end="url(#ctrl-arrow)"/>
+<rect x="494" y="554" width="84" height="18" rx="9" fill="#e0e7ff"/>
+<text x="536" y="567" text-anchor="middle" class="route-lbl">docker exec</text>
+<rect x="462" y="582" width="316" height="74" rx="8" fill="#ecfdf5" stroke="#0f766e" stroke-width="1.4"/>
+<text x="476" y="608" class="card-title">目标业务容器</text>
+<text x="476" y="630" class="card-sub">容器内独立生效 · 同宿其它容器零污染</text>
+</g>
+<path d="M326 306 H374 V214 H440" class="ctrl-line" marker-end="url(#ctrl-arrow)"/>
+<path d="M326 332 H374 V406 H440" class="ctrl-line" marker-end="url(#ctrl-arrow)"/>
+<path d="M374 406 V530 H440" class="ctrl-line" marker-end="url(#ctrl-arrow)"/>
+<path d="M326 458 H360 V248 H440" class="ctrl-line" marker-end="url(#ctrl-arrow)"/>
+<path d="M326 598 H348 V282 H440" class="ctrl-line" marker-end="url(#ctrl-arrow)"/>
+<rect x="380" y="382" width="44" height="18" rx="9" fill="#eef2ff" stroke="#818cf8"/>
+<text x="402" y="395" text-anchor="middle" class="route-lbl">SSH</text>
+<rect x="380" y="506" width="44" height="18" rx="9" fill="#eef2ff" stroke="#818cf8"/>
+<text x="402" y="519" text-anchor="middle" class="route-lbl">SSH</text>
+<g filter="url(#card-shadow)">
+<rect x="880" y="170" width="292" height="122" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/>
+<text x="896" y="196" class="card-title">本机观测网关</text>
+<rect x="1080" y="180" width="80" height="20" rx="10" fill="#fef3c7" stroke="#d97706"/>
+<text x="1120" y="194" text-anchor="middle" class="badge-txt" fill="#92400e">仅监听回环</text>
+<text x="896" y="224" class="card-bullet">127.0.0.1 · 仅 80/443 端口 · 最多 64 隧道</text>
+<text x="896" y="246" class="card-bullet">仅记录访问主机名，不留存请求响应正文</text>
+<text x="896" y="274" class="card-sub">web/local_gateway.py · Try it now</text>
+</g>
+<path d="M1026 292 V328" class="obs-line" marker-end="url(#obs-arrow)"/>
+<rect x="1036" y="298" width="90" height="18" rx="9" fill="#fef3c7"/>
+<text x="1081" y="311" text-anchor="middle" font-size="10.5" font-weight="700" fill="#92400e">inspect=True</text>
+<g filter="url(#card-shadow)">
+<rect x="880" y="334" width="292" height="182" rx="12" fill="url(#hero-grad)"/>
+<text x="898" y="364" class="hero-title">HTTP 代理网关</text>
+<text x="898" y="388" class="hero-sub">用户已有代理（或内置观测网关）</text>
+<line x1="898" y1="406" x2="1154" y2="406" stroke="#2dd4bf" stroke-opacity="0.4"/>
+<text x="898" y="432" class="hero-bullet">逐跳诊断：TCP → CONNECT → TLS → HTTP</text>
+<text x="898" y="458" class="hero-bullet">标出失败站点、跳转链路与应答对端 IP</text>
+<rect x="898" y="476" width="256" height="24" rx="6" fill="#042f2e" fill-opacity="0.45"/>
+<text x="1026" y="492" text-anchor="middle" font-size="11" font-weight="600" fill="#99f6e4">HTTP CONNECT · 1x TLS EOF Retry</text>
+</g>
+<g filter="url(#card-shadow)">
+<rect x="880" y="544" width="292" height="114" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="898" y="572" class="card-title">节点池双路径对照</text>
+<text x="898" y="596" class="card-sub">并发对照「显式代理」与「普通 curl」出网</text>
+<text x="898" y="624" class="card-bullet">Explicit proxy path  vs  Plain curl baseline</text>
+<text x="898" y="644" class="card-bullet">web/node_probe.py · web/node_baseline.py</text>
+</g>
+<path d="M794 242 H838 V619 H778" class="flow-line"/>
+<path d="M794 406 H838" class="flow-line"/>
+<circle cx="838" cy="406" r="4.5" fill="#0f766e"/>
+<path d="M838 425 H874" class="flow-line" marker-end="url(#flow-arrow)"/>
+<path d="M838 230 H874" class="obs-line" marker-end="url(#obs-arrow)"/>
+<circle cx="838" cy="242" r="4" fill="#0f766e"/>
+<path d="M1172 425 H1212" class="flow-line" marker-end="url(#flow-arrow)"/>
+<g filter="url(#card-shadow)">
+<rect x="1218" y="280" width="126" height="292" rx="12" fill="url(#dest-grad)" stroke="#0f766e" stroke-width="1.4"/>
+<path d="M1263 328 a12 12 0 0 1 22 -6 a10 10 0 0 1 16 8 a9 9 0 0 1 -2 18 h-34 a10 10 0 0 1 -2 -20 z" fill="#ffffff" stroke="#0f766e" stroke-width="1.8"/>
+<text x="1281" y="372" text-anchor="middle" class="card-title">目标 HTTPS 服务</text>
+<text x="1281" y="392" text-anchor="middle" class="card-sub">业务访问站点</text>
+<rect x="1237" y="414" width="88" height="21" rx="10" fill="#ffffff" stroke="#99f6e4"/>
+<text x="1281" y="428" text-anchor="middle" font-size="11" font-weight="600" fill="#0f5149">Google</text>
+<rect x="1237" y="442" width="88" height="21" rx="10" fill="#ffffff" stroke="#99f6e4"/>
+<text x="1281" y="456" text-anchor="middle" font-size="11" font-weight="600" fill="#0f5149">Claude</text>
+<rect x="1237" y="470" width="88" height="21" rx="10" fill="#ffffff" stroke="#99f6e4"/>
+<text x="1281" y="484" text-anchor="middle" font-size="11" font-weight="600" fill="#0f5149">ChatGPT</text>
+<rect x="1237" y="498" width="88" height="21" rx="10" fill="#ffffff" stroke="#99f6e4"/>
+<text x="1281" y="512" text-anchor="middle" font-size="11" font-weight="600" fill="#0f5149">GitHub</text>
+<rect x="1237" y="526" width="88" height="21" rx="10" fill="#ffffff" stroke="#99f6e4"/>
+<text x="1281" y="540" text-anchor="middle" font-size="11" font-weight="600" fill="#0f5149">PyPI</text>
+</g>
+<rect x="36" y="706" width="1308" height="36" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="58" y="728" class="foot-txt">零第三方依赖：核心与运行态纯 Python 3.8+ 标准库实现</text>
+<line x1="472" y1="714" x2="472" y2="734" stroke="#cbd5e1"/>
+<text x="494" y="728" class="foot-txt">凭据保护：SSH 密码等敏感字段绝不返回 API 或写入日志</text>
+<line x1="912" y1="714" x2="912" y2="734" stroke="#cbd5e1"/>
+<text x="934" y="728" class="foot-txt">可逆清理：关闭开关后完整恢复文件内容、权限与缺失状态</text>
 </svg>

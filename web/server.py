@@ -806,13 +806,14 @@ def run_remote_ssh_script(host, port, user, auth_type, password, script, timeout
     return ssh_with_script(cmd, script, timeout)
 
 
-def generate_provisioning_script(proxy_url, no_proxy, action="on", owner=""):
+def generate_provisioning_script(proxy_url, no_proxy, action="on", owner="", is_docker=False):
     """Deploy a POSIX script with per-file snapshots and conflict detection."""
     if action not in ("on", "off"):
         raise ValueError("Invalid switch action")
     template = (WEB_DIR / "provision.sh").read_text(encoding="utf-8")
     return "action={}\nproxy={}\nbypass={}\n".format(
-        action, shlex.quote(proxy_url), shlex.quote(validate_bypass(no_proxy))) + "npt_owner={}\n".format(shlex.quote(owner)) + template
+        action, shlex.quote(proxy_url), shlex.quote(validate_bypass(no_proxy))) + "npt_owner={}\nnpt_is_docker={}\n".format(
+        shlex.quote(owner), "1" if is_docker else "0") + template
 
 
 def validate_ssh_destination(host, user, container=None):
@@ -1037,22 +1038,27 @@ def apply_node_proxy(target, action, cfg):
             current_state = current.get("managed", {}).get("state")
             if current_state not in known_states:
                 return dict(result, error="无法确认当前托管状态；未执行配置写入，原基线保留。")
-            if action == "off" and current_state == "disabled":
+            if action == "off" and current_state == "disabled" and not current.get("managed", {}).get("legacy_residual", {}).get("any"):
                 # The prior off may have committed before its verification failed.
                 # Re-check the preserved evidence instead of re-running a legacy guard.
                 restored = baseline
         if action == "off" and not baseline:
             restored = target.get("_node_restored_baseline")
         if restored:
-            baseline = restored
+            pre_verification = node_baseline.verify_node_baseline(target, restored, run_node_script, gateway)
+            if pre_verification.get("observation", {}).get("managed", {}).get("legacy_residual", {}).get("any"):
+                restored = None
+            else:
+                baseline = restored
         if not baseline:
             baseline = node_baseline.capture_node_baseline(target, run_node_script, gateway)
             if not baseline.get("ok"):
                 return dict(result, error="无法读取节点基线；尚未执行配置写入。")
             if baseline.get("managed", {}).get("state") not in known_states:
                 return dict(result, error="节点托管状态未知；尚未执行配置写入，登记保留。")
-            if action == "off" and not (baseline.get("managed", {}).get("state") in ("enabled", "partial", "conflict")
-                                      and baseline.get("managed", {}).get("restoration_manifest")):
+            has_residual = bool(baseline.get("managed", {}).get("legacy_residual", {}).get("any"))
+            if action == "off" and not ((baseline.get("managed", {}).get("state") in ("enabled", "partial", "conflict")
+                                      and baseline.get("managed", {}).get("restoration_manifest")) or has_residual):
                 return dict(result, error="缺少启用前基线或可核验的旧快照；未写入配置，无法宣称已恢复，登记保留。")
         if not restored:
             result["_node_baseline"] = baseline
@@ -1064,9 +1070,10 @@ def apply_node_proxy(target, action, cfg):
             # this persisted baseline makes the operation recoverable after restart.
             if any(item is target for item in cfg.get("clients", [])):
                 save_config(cfg)
+        is_docker = target.get("os_type") == "docker" or mode == "docker_host"
         script = generate_provisioning_script(gateway_url(gateway) if action == "on" else "",
                                              cfg.get("no_proxy", "localhost,127.0.0.1"), action,
-                                             owner=target.get("id", ""))
+                                             owner=target.get("id", ""), is_docker=is_docker)
         completed = (subprocess.CompletedProcess([], 0, "", "") if restored else
                      run_node_script(target, node_baseline.wrap_login_script(script), timeout=25))
         if completed.returncode:
@@ -1090,8 +1097,11 @@ def apply_node_proxy(target, action, cfg):
                             "identity": identity_ok, "owner": owner_ok, "login_proxy": login_ok}}
             result.update(managed_state="enabled" if verified else "unknown", verification=verification)
         else:
-            verification = node_baseline.verify_node_baseline(target, baseline, run_node_script, gateway)
+            verification = (pre_verification if restored else
+                            node_baseline.verify_node_baseline(target, baseline, run_node_script, gateway))
             verified = bool(verification.get("verified"))
+            if verification.get("observation", {}).get("managed", {}).get("legacy_residual", {}).get("any"):
+                verified = False
             safe_verification = {key: verification.get(key) for key in
                                  ("verified", "status", "verification_scope", "checks")}
             variables = verification.get("observation", {}).get("login", {}).get("proxy_variables", {})
