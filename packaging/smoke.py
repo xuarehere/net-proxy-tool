@@ -44,6 +44,7 @@ def api(port, path, payload=None, token=None):
 
 
 def browser_setup(port, gateway):
+    import re
     from playwright.sync_api import sync_playwright
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
@@ -61,7 +62,7 @@ def browser_setup(port, gateway):
         with page.expect_response(lambda r: "/api/test-gateway" in r.url) as tested:
             page.locator("#setup-test").click()
         assert tested.value.json()["success"]
-        page.locator("#setup-result", has_text="代理请求成功").wait_for()
+        page.locator("#setup-result", has_text=re.compile(r"代理请求成功|Proxy request succeeded")).wait_for()
         assert "HTTP 200" in page.locator("#setup-result").inner_text()
         assert not errors, errors
         browser.close()
