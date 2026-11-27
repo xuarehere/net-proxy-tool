@@ -55,9 +55,9 @@
   - Add the v1.5.0 changelog entries
   - _Requirements: 1.3–1.4_
 
-- [ ] 10. Validate and commit Task 4
+- [x] 10. Validate and commit Task 4 (commit `ca400e3`)
   - [x] 10.1 Run focused tests (15 access, 7 reliability, 8 property)
   - [x] 10.2 Run the full suite with a temporary `NET_PROXY_CONFIG` (200 tests, 1 optional SSH-image skip)
   - [x] 10.3 Run the Python 3.8 check, the stdlib check and the secret scans (`findings=0`)
-  - [ ] 10.4 Review the complete Task 4 diff and create one local commit; do not push
+  - [x] 10.4 Review the complete Task 4 diff and create one local commit; do not push
   - _Requirements: 8.1–8.3_

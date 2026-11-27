@@ -20,11 +20,11 @@
   - The demo request through `https://example.com/`
   - _Requirements: 2.1–2.4_
 
-- [ ] 4. Validate and commit Task 12
+- [x] 4. Validate and commit Task 12 (commit `faef381`)
   - [x] 4.1 Run the focused tests (7 console gateway tests)
   - [x] 4.2 Run the full suite with a temporary `NET_PROXY_CONFIG` (273 tests, 1 optional SSH-image skip)
   - [x] 4.3 Run the Python 3.8 check, the stdlib check and the secret scans (`findings=0`)
-  - [ ] 4.4 Review the complete Task 12 diff and create one local commit; do not push
+  - [x] 4.4 Review the complete Task 12 diff and create one local commit; do not push
   - _Requirements: 4.1–4.3_
 
 ## Note

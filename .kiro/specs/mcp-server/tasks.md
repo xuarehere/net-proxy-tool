@@ -26,11 +26,11 @@
   - `docs/kiro/mcp.json` for the maintainer to copy into `.kiro/settings/mcp.json`
   - _Requirements: 1.1–1.2_
 
-- [ ] 5. Validate and commit Task 6
+- [x] 5. Validate and commit Task 6 (commit `dbba3ca`)
   - [x] 5.1 Run the focused tests (15 protocol tests, P8 property)
   - [x] 5.2 Run the full suite with a temporary `NET_PROXY_CONFIG` (232 tests, 1 optional SSH-image skip)
   - [x] 5.3 Run the Python 3.8 check, the stdlib check and the secret scans (`findings=0`)
-  - [ ] 5.4 Review the complete Task 6 diff and create one local commit; do not push
+  - [x] 5.4 Review the complete Task 6 diff and create one local commit; do not push
   - _Requirements: 7.1–7.3_
 
 ## Note

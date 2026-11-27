@@ -16,8 +16,8 @@
   - The checklist separates the automated work from the maintainer's remaining steps
   - _Requirements: 3.1–3.5_
 
-- [ ] 4. Validate and commit Task 15
+- [x] 4. Validate and commit Task 15 (commit `543c74e`)
   - [x] 4.1 Run the demo and confirm it leaves nothing behind (`LocalGateway.live_count()` is 0 afterwards)
-  - [ ] 4.2 Run the full suite, the stdlib check and the secret scans
-  - [ ] 4.3 Create one local commit for `tools/demo.py` and the specification; the drafts stay in `scratch/`
+  - [x] 4.2 Run the full suite, the stdlib check and the secret scans
+  - [x] 4.3 Create one local commit for `tools/demo.py` and the specification; the drafts stay in `scratch/`
   - _Requirements: 1.1–1.5, 4.1–4.5_

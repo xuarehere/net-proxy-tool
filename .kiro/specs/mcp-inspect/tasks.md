@@ -17,11 +17,11 @@
   - Add `inspect` to the input schema of `run_with_proxy`
   - _Requirements: 1.1–1.2_
 
-- [ ] 4. Validate and commit Task 9
+- [x] 4. Validate and commit Task 9 (commit `8f66dae`)
   - [x] 4.1 Run the focused tests (4 inspect tests, 11 gateway tests)
   - [x] 4.2 Run the full suite with a temporary `NET_PROXY_CONFIG` (261 tests, 1 optional SSH-image skip)
   - [x] 4.3 Run the Python 3.8 check, the stdlib check and the secret scans (`findings=0`)
-  - [ ] 4.4 Review the complete Task 9 diff and create one local commit; do not push
+  - [x] 4.4 Review the complete Task 9 diff and create one local commit; do not push
   - _Requirements: 4.1–4.2_
 
 ## Note

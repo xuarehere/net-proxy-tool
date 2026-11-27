@@ -27,9 +27,9 @@
   - Add `web/local_gateway.py` to the packaging allowlist
   - _Requirements: 1.1, 6.1_
 
-- [ ] 5. Validate and commit Task 8
+- [x] 5. Validate and commit Task 8 (commit `4fe71e4`)
   - [x] 5.1 Run the focused tests (9 gateway tests, P10 property)
   - [x] 5.2 Run the full suite with a temporary `NET_PROXY_CONFIG` (255 tests, 1 optional SSH-image skip)
   - [x] 5.3 Run the Python 3.8 check, the stdlib check and the secret scans (`findings=0`)
-  - [ ] 5.4 Review the complete Task 8 diff and create one local commit; do not push
+  - [x] 5.4 Review the complete Task 8 diff and create one local commit; do not push
   - _Requirements: 7.1–7.3_

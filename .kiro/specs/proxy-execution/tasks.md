@@ -22,9 +22,9 @@
   - Keep it out of the automatic approval list
   - _Requirements: 1.1–1.2_
 
-- [ ] 4. Validate and commit Task 7
+- [x] 4. Validate and commit Task 7 (commit `2c81b30`)
   - [x] 4.1 Run the focused tests (11 execution tests, P9 property)
   - [x] 4.2 Run the full suite with a temporary `NET_PROXY_CONFIG` (244 tests, 1 optional SSH-image skip)
   - [x] 4.3 Run the Python 3.8 check, the stdlib check and the secret scans (`findings=0`)
-  - [ ] 4.4 Review the complete Task 7 diff and create one local commit; do not push
+  - [x] 4.4 Review the complete Task 7 diff and create one local commit; do not push
   - _Requirements: 6.1–6.3_

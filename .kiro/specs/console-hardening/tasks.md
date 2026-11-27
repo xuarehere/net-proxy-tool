@@ -44,10 +44,10 @@
   - [x] 6.6 P6 generated POST bodies against every registered endpoint
   - _Requirements: 7.1–7.3_
 
-- [ ] 7. Validate and commit Task 3
+- [x] 7. Validate and commit Task 3 (commit `94d13c3`)
   - [x] 7.1 Run focused tests with `HYPOTHESIS_PROFILE=ci` (12 HTTP regressions, P1–P6 property module)
   - [x] 7.2 Run Python 3.8 compatibility and stdlib checks
   - [x] 7.3 Run current-change secret scan (`findings=0`)
   - [x] 7.4 Run the full suite with a temporary `NET_PROXY_CONFIG` (179 tests, 1 optional SSH-image skip)
-  - [ ] 7.5 Review the complete Task 3 diff and create one local commit; do not push
+  - [x] 7.5 Review the complete Task 3 diff and create one local commit; do not push
   - _Requirements: 7.1–7.3_

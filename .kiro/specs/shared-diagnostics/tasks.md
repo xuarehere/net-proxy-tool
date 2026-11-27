@@ -28,9 +28,9 @@
   - Add `web/diagnostics.py` to `packaging/build_portable.py: FILES`
   - _Requirements: 1.1, 4.1_
 
-- [ ] 6. Validate and commit Task 5
+- [x] 6. Validate and commit Task 5 (commit `e2536b4`)
   - [x] 6.1 Run focused tests (15 report and release tests)
   - [x] 6.2 Run the full suite with a temporary `NET_PROXY_CONFIG` (216 tests, 1 optional SSH-image skip)
   - [x] 6.3 Run the Python 3.8 check, the stdlib check and the secret scans (`findings=0`)
-  - [ ] 6.4 Review the complete Task 5 diff and create one local commit; do not push
+  - [x] 6.4 Review the complete Task 5 diff and create one local commit; do not push
   - _Requirements: 6.1–6.3_

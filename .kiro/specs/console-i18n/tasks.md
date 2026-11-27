@@ -32,9 +32,9 @@
   - `packaging/test_browser_i18n.py` and the CI step
   - _Requirements: 5.2–5.3_
 
-- [ ] 7. Validate and commit Task 11
+- [x] 7. Validate and commit Task 11 (commit `f09af3b`)
   - [x] 7.1 Run the focused tests (9 language tests)
   - [x] 7.2 Run the full suite with a temporary `NET_PROXY_CONFIG` (282 tests, 1 optional SSH-image skip)
-  - [ ] 7.3 Run the Python 3.8 check, the stdlib check and the secret scans
-  - [ ] 7.4 Review the complete Task 11 diff and create one local commit; do not push
+  - [x] 7.3 Run the Python 3.8 check, the stdlib check and the secret scans
+  - [x] 7.4 Review the complete Task 11 diff and create one local commit; do not push
   - _Requirements: 5.1–5.3_
