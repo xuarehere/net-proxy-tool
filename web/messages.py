@@ -355,7 +355,7 @@ MESSAGES = {
     },
     'hb-docker-span': {
         "en": 'Net-Proxy-Tool v1.5.0 · HTTP proxy console',
-        "zh-CN": 'Net-Proxy-Tool v1.4.3 · HTTP 代理控制台',
+        "zh-CN": 'Net-Proxy-Tool v1.5.0 · HTTP 代理控制台',
     },
     'hb-sdk-btn-copy': {
         "en": 'Copy the example',
@@ -1835,7 +1835,7 @@ MESSAGES = {
     },
     'title': {
         "en": 'Net-Proxy-Tool — cross-platform console for LAN proxying and Docker network isolation (v1.5.0)',
-        "zh-CN": 'Net-Proxy-Tool 通用跨平台局域网出海与 Docker 容器隔离控制中心 (v1.4.3)',
+        "zh-CN": 'Net-Proxy-Tool 通用跨平台局域网出海与 Docker 容器隔离控制中心 (v1.5.0)',
     },
     'top-clients-tbody-card-subdesc': {
         "en": 'Manage every proxy gateway, set the default gateway, test connectivity and assign gateways to many nodes',

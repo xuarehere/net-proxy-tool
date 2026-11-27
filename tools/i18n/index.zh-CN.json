@@ -1,5 +1,5 @@
 {
-  "title": "Net-Proxy-Tool 通用跨平台局域网出海与 Docker 容器隔离控制中心 (v1.4.3)",
+  "title": "Net-Proxy-Tool 通用跨平台局域网出海与 Docker 容器隔离控制中心 (v1.5.0)",
   "brand-sub": "HTTP 代理控制台",
   "global-gw-status-text": "尚未选择网关",
   "setup-title": "连接你的 HTTP 代理",
@@ -118,7 +118,7 @@
   "hb-docker-h3": "为远程账号长期启用代理",
   "hb-docker-p": "在「拓扑与节点管理」登记 Linux 节点或容器，填写 SSH 用户、主机和实际端口。Windows 控制端使用 OpenSSH 密钥。宿主机 Docker 模式还需要该登录账号可执行 docker exec。保存后可先做预检。",
   "hb-docker-p-2": "显式开启时才会下发工具和 shell 配置。操作目标是所选账号或容器，以 root 执行时还可能修改目标系统级配置。关闭时按快照恢复。遇到人工编辑或旧版缺少快照时，请查看提示并核对备份。",
-  "hb-docker-span": "Net-Proxy-Tool v1.4.3 · HTTP 代理控制台",
+  "hb-docker-span": "Net-Proxy-Tool v1.5.0 · HTTP 代理控制台",
   "footer-gw-label": "未配置",
   "modal-client-title": "➕ 登记新业务节点",
   "form-client-mode-label": "业务节点名称 *:",

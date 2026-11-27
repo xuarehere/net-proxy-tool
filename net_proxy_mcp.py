@@ -28,7 +28,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from sdk.config import proxy_environment, proxy_url  # noqa: E402
+from sdk.config import VERSION, proxy_environment, proxy_url  # noqa: E402
 
 PROTOCOL_VERSION = "2026-07-28"
 LEGACY_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
@@ -59,7 +59,7 @@ MAX_OUTPUT_BYTES = 256 * 1024
 DEFAULT_OUTPUT_BYTES = 64 * 1024
 
 SERVER_NAME = "net-proxy-tool"
-SERVER_VERSION = "1.4.3"
+SERVER_VERSION = VERSION
 INSTRUCTIONS = (
     "This server reports the proxy state of net-proxy-tool. Use list_gateways and list_nodes for an "
     "overview, check_gateway to test one gateway, check_gateway_targets to test the configured sites, "
