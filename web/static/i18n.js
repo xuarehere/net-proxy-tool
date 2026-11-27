@@ -3,7 +3,7 @@
  * The catalogue arrives from /api/i18n.js, which the server builds from
  * web/messages.py. A key that the catalogue does not know falls back to
  * English and then to the key itself, and a missing catalogue leaves the
- * Chinese text of the page untouched.
+ * English static text of the page untouched.
  */
 (function () {
   const STORAGE_KEY = "npt-lang";
@@ -20,10 +20,6 @@
       if (saved) return normalize(saved);
     } catch (error) {
       /* A blocked storage must not stop the page. */
-    }
-    const languages = navigator.languages || [navigator.language || ""];
-    for (const entry of languages) {
-      if (String(entry).toLowerCase().startsWith("zh")) return "zh-CN";
     }
     return "en";
   }

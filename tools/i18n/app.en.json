@@ -1,6 +1,8 @@
 {
   "attachCopyButtons": "Copied! ✓",
   "bindRowTarget": "Use the target of the node pool",
+  "local-gateway-description": "Built-in local observation gateway listening on loopback only.",
+  "local-gateway-name": "Local observation gateway",
   "finishSetupSave": "Switching the default gateway…",
   "finishSetupSave-2": "It is now the default gateway.",
   "finishSetupSave-3": "Saving and reading the gateway configuration…",

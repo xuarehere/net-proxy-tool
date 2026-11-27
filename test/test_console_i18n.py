@@ -9,8 +9,10 @@ import threading
 import unittest
 from unittest.mock import patch
 
+from tools import demo
 from web import messages
 from web import server
+from web.local_gateway import GATEWAY_NAME, LocalGateway
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_I18N = re.compile(r'data-i18n(?:-[a-z-]+)?="([^"]+)"')
@@ -170,20 +172,38 @@ class ApiLanguageTests(unittest.TestCase):
         self.assertIn("javascript", content_type)
         self.assertTrue(body.startswith(b"window.NPT_MESSAGES = "))
 
+    def test_default_language_and_static_assets_are_english(self):
+        self.assertEqual(messages.DEFAULT_LANGUAGE, "en")
+        html = (ROOT / "web" / "static" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<html lang="en">', html)
+        for lineno, line in enumerate(html.splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("<!--") or 'id="lang-toggle"' in stripped:
+                continue
+            self.assertFalse(CJK.search(stripped), f"index.html:{lineno} still has CJK: {stripped}")
+        example_text = (ROOT / "config.example.json").read_text(encoding="utf-8")
+        self.assertFalse(CJK.search(example_text), "config.example.json must default to English")
+        self.assertEqual(GATEWAY_NAME, "Local observation gateway")
+        record = LocalGateway(port=0).config_record()
+        self.assertFalse(CJK.search(record["name"] + record["description"]))
+        self.assertIn("en", demo.MESSAGES)
+        self.assertIn("zh-CN", demo.MESSAGES)
+        self.assertEqual(set(demo.MESSAGES["en"]), set(demo.MESSAGES["zh-CN"]))
+
     def test_an_api_error_follows_the_request_language(self):
         status, _, body = self.request("/api/gateways/delete", method="POST", body={})
         self.assertEqual(status, 400)
-        self.assertIn("网关ID不能为空".encode("utf-8"), body)
-        english_status, _, english = self.request("/api/gateways/delete", language="en",
-                                                 method="POST", body={})
-        self.assertEqual(english_status, 400)
-        self.assertIn(b"The gateway id cannot be empty", english)
+        self.assertIn(b"The gateway id cannot be empty", body)
+        zh_status, _, zh_body = self.request("/api/gateways/delete", language="zh-CN",
+                                             method="POST", body={})
+        self.assertEqual(zh_status, 400)
+        self.assertIn("网关ID不能为空".encode("utf-8"), zh_body)
 
     def test_an_unknown_language_keeps_the_default(self):
         status, _, body = self.request("/api/gateways/delete", language="fr",
                                        method="POST", body={})
         self.assertEqual(status, 400)
-        self.assertIn("网关ID不能为空".encode("utf-8"), body)
+        self.assertIn(b"The gateway id cannot be empty", body)
 
 
 if __name__ == "__main__":

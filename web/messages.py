@@ -9,7 +9,7 @@ import json
 import re
 
 LANGUAGES = ("en", "zh-CN")
-DEFAULT_LANGUAGE = "zh-CN"
+DEFAULT_LANGUAGE = "en"
 PLACEHOLDER = re.compile(r"\{([A-Za-z0-9_]+)\}")
 
 MESSAGES = {
@@ -572,6 +572,14 @@ MESSAGES = {
     'local-gateway-demo': {
         "en": 'Try it now',
         "zh-CN": '立即体验',
+    },
+    'local-gateway-description': {
+        "en": 'Built-in local observation gateway listening on loopback only.',
+        "zh-CN": '随工具提供的本机观测网关，只监听回环地址。',
+    },
+    'local-gateway-name': {
+        "en": 'Local observation gateway',
+        "zh-CN": '本机观测网关',
     },
     'local-gateway-panel-p': {
         "en": 'The tool ships with an observation gateway that listens only on this machine, so you can try the whole proxy flow right away.',
@@ -2556,6 +2564,14 @@ MESSAGES = {
     '本机观测网关已{}': {
         "en": 'The local observation gateway has been {}',
         "zh-CN": '本机观测网关已{}',
+    },
+    '本机观测网关已停止': {
+        "en": 'The local observation gateway stopped',
+        "zh-CN": '本机观测网关已停止',
+    },
+    '本机观测网关已启动': {
+        "en": 'The local observation gateway started',
+        "zh-CN": '本机观测网关已启动',
     },
     '核验未确认，登记保留': {
         "en": 'The verification was not confirmed; the record is kept',

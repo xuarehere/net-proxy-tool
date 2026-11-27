@@ -394,7 +394,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setupId = gw?.id || "";
     setupSelect.value = setupId;
     setupDirty = false;
-    setupName.value = gw?.name || t("selectSetupGateway");
+    setupName.value = gw ? displayGatewayName(gw) : t("selectSetupGateway");
     setupHost.value = gw?.host || "";
     setupPort.value = gw?.port || "";
     setupSave.textContent = gw ? t("selectSetupGateway-2") : t("selectSetupGateway-3");
@@ -531,7 +531,7 @@ document.addEventListener("DOMContentLoaded", () => {
   localGatewayDemoBtn.addEventListener("click", async () => {
     const state = await localGatewayAction("start");
     if (!state || !state.gateway) return;
-    setupName.value = state.gateway.name || t("localGatewayAction-2");
+    setupName.value = displayGatewayName(state.gateway) || t("localGatewayAction-2");
     setupHost.value = state.gateway.host || "127.0.0.1";
     setupPort.value = String(state.gateway.port || "");
     setupUrl.value = "https://example.com/";
@@ -549,7 +549,7 @@ document.addEventListener("DOMContentLoaded", () => {
     activeGateway = gateways.find(g => g.id === appConfig.active_gateway_id) || gateways[0] || null;
 
     setupSelect.replaceChildren(new Option(t("renderAll"), ""));
-    gateways.forEach(gw => setupSelect.add(new Option(t("renderAll-2") + gw.name + " (" + gw.host + ":" + gw.port + ")", gw.id)));
+    gateways.forEach(gw => setupSelect.add(new Option(t("renderAll-2") + displayGatewayName(gw) + " (" + gw.host + ":" + gw.port + ")", gw.id)));
     if (setupDirty && (!setupId || gateways.some(gw => gw.id === setupId))) {
       setupSelect.value = setupId;
       setupDefault.hidden = !setupId || setupId === activeGateway?.id;
@@ -562,9 +562,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (activeGateway) {
       const gwStr = `${activeGateway.host}:${activeGateway.port}`;
       globalStatusText.textContent = t("renderAll-4", {gwStr});
-      footerGwLabel.textContent = `${activeGateway.name} (${gwStr})`;
+      footerGwLabel.textContent = `${displayGatewayName(activeGateway)} (${gwStr})`;
       sbActiveGwVal.textContent = gwStr;
-      sbActiveGwSub.textContent = activeGateway.name;
+      sbActiveGwSub.textContent = displayGatewayName(activeGateway);
     }
 
     renderWizardSelectors();
@@ -749,7 +749,7 @@ document.addEventListener("DOMContentLoaded", () => {
     gateways.forEach(gw => {
       const opt = document.createElement("option");
       opt.value = gw.id;
-      opt.textContent = `${gw.name} (${gw.host}:${gw.port})` + (gw.id === appConfig.active_gateway_id ? t("renderWizardSelectors") : "");
+      opt.textContent = `${displayGatewayName(gw)} (${gw.host}:${gw.port})` + (gw.id === appConfig.active_gateway_id ? t("renderWizardSelectors") : "");
       if (gw.id === gatewayId) opt.selected = true;
       wizardGwSelect.appendChild(opt);
     });
@@ -1202,7 +1202,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const previousId = sbGwOverrideSelect.value;
     sbGwOverrideSelect.replaceChildren(new Option(t("renderSandboxSelectors"), ""));
     for (const gw of appConfig.gateways) {
-      sbGwOverrideSelect.add(new Option(gw.name + " (" + gw.host + ":" + gw.port + ")", gw.id));
+      sbGwOverrideSelect.add(new Option(displayGatewayName(gw) + " (" + gw.host + ":" + gw.port + ")", gw.id));
     }
     if (appConfig.gateways.some(gw => gw.id === previousId)) sbGwOverrideSelect.value = previousId;
     resetBusinessMetrics();
@@ -1215,7 +1215,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function resetBusinessMetrics() {
     const gw = businessGateway();
     sbActiveGwVal.textContent = gw ? gatewayAddress(gw) : t("resetBusinessMetrics");
-    sbActiveGwSub.textContent = gw?.name || t("resetBusinessMetrics-2");
+    sbActiveGwSub.textContent = gw ? displayGatewayName(gw) : t("resetBusinessMetrics-2");
     sbGwStatusVal.textContent = sbDiagRateVal.textContent = t("resetBusinessMetrics-3");
     sbGwRttSub.textContent = sbDiagSummary.textContent = t("resetBusinessMetrics-4");
     sbTerminalOutput.textContent = t("resetBusinessMetrics-5");
@@ -1742,12 +1742,12 @@ document.addEventListener("DOMContentLoaded", () => {
       const isDefault = (g.id === appConfig.active_gateway_id);
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td><strong>${escapeHtml(g.name)}</strong></td>
+        <td><strong>${escapeHtml(displayGatewayName(g))}</strong></td>
         <td><code>${escapeHtml(g.host)}</code></td>
         <td>${g.port}</td>
         <td>${(g.protocol || 'http').toUpperCase()}</td>
         <td>${isDefault ? t("renderGatewaysTable") : t("renderGatewaysTable-2")}</td>
-        <td style="color:var(--text-muted); font-size:12px;">${escapeHtml(g.description || '-')}</td>
+        <td style="color:var(--text-muted); font-size:12px;">${escapeHtml(displayGatewayDescription(g) || '-')}</td>
         <td>
           <div class="table-actions">
             ${!isDefault ? t("renderGatewaysTable-3", {id_: escapeHtml(g.id)}) : ''}
@@ -1906,7 +1906,7 @@ document.addEventListener("DOMContentLoaded", () => {
     (appConfig.gateways || []).forEach(g => {
       const opt = document.createElement("option");
       opt.value = g.id;
-      opt.textContent = `${g.name} (${g.host}:${g.port})`;
+      opt.textContent = `${displayGatewayName(g)} (${g.host}:${g.port})`;
       formClientGw.appendChild(opt);
     });
 
@@ -2345,6 +2345,28 @@ document.addEventListener("DOMContentLoaded", () => {
   // 绑定开发者手册中的复制按钮
   attachCopyButtons(document.getElementById("tab-handbook"));
   attachCopyButtons(wizardProbeActions);
+
+  function displayGatewayName(gw) {
+    if (!gw) return "";
+    if (gw.id === "local-gateway") {
+      const defaults = window.NPT_MESSAGES?.["local-gateway-name"] || {};
+      if (!gw.name || gw.name === "Local observation gateway" || gw.name === defaults["en"] || gw.name === defaults["zh-CN"]) {
+        return t("local-gateway-name");
+      }
+    }
+    return gw.name || "";
+  }
+
+  function displayGatewayDescription(gw) {
+    if (!gw) return "";
+    if (gw.id === "local-gateway") {
+      const defaults = window.NPT_MESSAGES?.["local-gateway-description"] || {};
+      if (!gw.description || gw.description === defaults["en"] || gw.description === defaults["zh-CN"] || gw.description.toLowerCase().includes("local observation gateway")) {
+        return t("local-gateway-description");
+      }
+    }
+    return gw.description || "";
+  }
 
   function escapeHtml(str) {
     if (!str) return "";

@@ -36,7 +36,7 @@ The macOS archives are terminal distributions and are not notarized with Apple D
 ## 3. Add a gateway and send a request
 
 1. On the first tab, give the gateway a recognizable name and enter its actual host and port. Save it. Your first gateway becomes active.
-2. Enter an allowed HTTP(S) target in the test URL field. Click **发送代理请求** (Send proxy request). Read the resulting HTTP status. A reachable TCP port with a failed target request calls for checking the proxy protocol or upstream connection.
+2. Enter an allowed HTTP(S) target in the test URL field. Click **Send a proxy request**. Read the resulting HTTP status. A reachable TCP port with a failed target request calls for checking the proxy protocol or upstream connection.
 
 **Success** · A successful HTTP status from your target completes the first request. To run your next task, you can use the console or copy the displayed command. A site can require authentication or rate-limit requests, so check the returned status code.
 

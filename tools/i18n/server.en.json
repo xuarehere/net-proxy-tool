@@ -75,6 +75,8 @@
   "本机模式使用控制台账号，不进行 SSH 登录；Windows 请使用单命令代理。": "The local mode uses the console account and does not log in over SSH; on Windows use the one-command proxy.",
   "本机观测网关只监听回环地址，远程节点无法访问；请为远程节点选择可达的网关。": "The local observation gateway listens on the loopback interface only, so a remote node cannot reach it; choose a reachable gateway for the remote node.",
   "本机观测网关已{}": "The local observation gateway has been {}",
+  "本机观测网关已启动": "The local observation gateway started",
+  "本机观测网关已停止": "The local observation gateway stopped",
   "核验未确认，登记保留": "The verification was not confirmed; the record is kept",
   "此执行上下文由其它节点持有；未覆盖其配置。": "Another node holds this execution context; its configuration was not overwritten.",
   "此接口只接受 no_proxy": "This endpoint only accepts no_proxy",

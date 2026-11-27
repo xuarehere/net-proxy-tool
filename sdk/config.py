@@ -26,6 +26,16 @@ _LEGACY_SITES = {
     "YouTube": ("https://www.youtube.com", "高吞吐流媒体/视音频数据", "多媒体"),
 }
 
+_LEGACY_SITES_EN = {
+    "Google": ("https://www.google.com", "Global web connectivity baseline", "Core"),
+    "GitHub": ("https://github.com", "Source control and releases", "Developer"),
+    "Raw GitHub": ("https://raw.githubusercontent.com", "Direct script and artifact fetches", "Developer"),
+    "HuggingFace": ("https://huggingface.co", "Open AI model weights and datasets", "AI / LLM"),
+    "PyPI": ("https://pypi.org", "Official Python package index", "Packaging"),
+    "OpenAI API": ("https://api.openai.com", "LLM API endpoint", "AI / LLM"),
+    "YouTube": ("https://www.youtube.com", "High-throughput media streaming", "Media"),
+}
+
 TARGETS = {
     "Google": DEFAULT_TEST_URL,
     "Claude": "https://claude.ai/",
@@ -42,9 +52,11 @@ def diagnostic_defaults(saved=None):
         return targets
     old_example = {name: {"url": url, "desc": desc, "category": category}
                    for name, (url, desc, category) in _LEGACY_SITES.items()}
+    old_en_example = {name: {"url": url, "desc": desc, "category": category}
+                      for name, (url, desc, category) in _LEGACY_SITES_EN.items()}
     old_generated = {name: {"url": data["url"], "desc": name, "category": "HTTPS"}
                      for name, data in old_example.items()}
-    if saved != old_example and saved != old_generated:
+    if saved not in (old_example, old_en_example, old_generated):
         return saved
     for name, data in saved.items():
         targets[name] = dict(data, url=TARGETS[name])

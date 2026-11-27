@@ -68,12 +68,14 @@ def run():
         expect(english.locator("#setup-title")).to_have_text("连接你的 HTTP 代理")
         english.close()
 
-        # A browser without a preference follows its own language list.
-        default = browser.new_page()
+        # A browser without a stored preference starts in English by default.
+        default = browser.new_page(locale="zh-CN")
         default.add_init_script("try { localStorage.removeItem('npt-lang'); } catch (error) {}")
         default.goto(url)
-        chosen = default.evaluate("window.nptI18n.language()")
-        assert chosen in ("en", "zh-CN"), chosen
+        expect(default.locator("#setup-title")).to_have_text("Connect your HTTP proxy")
+        expect(default.locator("#lang-toggle")).to_have_text("中文")
+        expect(default.locator("html")).to_have_attribute("lang", "en")
+        assert default.evaluate("window.nptI18n.language()") == "en"
         default.close()
 
 

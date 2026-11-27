@@ -1,6 +1,8 @@
 {
   "attachCopyButtons": "已复制! ✓",
   "bindRowTarget": "使用节点池目标",
+  "local-gateway-description": "随工具提供的本机观测网关，只监听回环地址。",
+  "local-gateway-name": "本机观测网关",
   "finishSetupSave": "正在切换默认网关…",
   "finishSetupSave-2": "已设为默认网关。",
   "finishSetupSave-3": "正在保存并读取网关配置…",

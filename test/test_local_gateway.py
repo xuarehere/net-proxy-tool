@@ -98,7 +98,7 @@ class LocalGatewayTests(unittest.TestCase):
         request = ("GET http://127.0.0.1:{}/seen HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
                    .format(self.origin_port)).encode()
         self.raw(request)
-        records = self.gateway.records_list()
+        records = self.wait_for_record("established")
         self.assertTrue(records)
         record = records[-1]
         self.assertEqual(record["host"], "127.0.0.1")

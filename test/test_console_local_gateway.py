@@ -78,7 +78,7 @@ class ConsoleLocalGatewayTests(unittest.TestCase):
                 "bound_gateway_id": "local-gateway"}
         status, body = self.request("/api/clients/add", node)
         self.assertEqual(status, 400)
-        self.assertIn("回环", body["error"])
+        self.assertIn("loopback", body["error"])
         self.assertEqual(load_config()["clients"], [])
 
     def test_a_local_node_may_use_the_local_gateway(self):

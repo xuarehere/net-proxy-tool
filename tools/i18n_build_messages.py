@@ -58,7 +58,7 @@ def render(messages):
         "import re",
         "",
         "LANGUAGES = (\"en\", \"zh-CN\")",
-        "DEFAULT_LANGUAGE = \"zh-CN\"",
+        "DEFAULT_LANGUAGE = \"en\"",
         "PLACEHOLDER = re.compile(r\"\\{([A-Za-z0-9_]+)\\}\")",
         "",
         "MESSAGES = {",

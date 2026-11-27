@@ -2,7 +2,7 @@
 
 ## Introduction
 
-The console speaks Chinese today. v1.5.0 adds English: a browser that does not ask for Chinese gets English, and a toggle in the top bar switches the language at any time. The catalogue lives in one place, so the console and the API cannot drift apart.
+The console speaks both English and Simplified Chinese. v1.5.0 defaults the console, API fallbacks, example configuration and demo CLI to English for immediate international usability, while a top-bar toggle (and `--lang zh-CN` on the demo CLI) switches to Simplified Chinese at any time. The catalogue lives in one place, so the console and the API cannot drift apart.
 
 ## Glossary
 
@@ -30,10 +30,10 @@ The console speaks Chinese today. v1.5.0 adds English: a browser that does not a
 #### Acceptance Criteria
 
 1. WHEN the browser stored a language, THE Console SHALL use it.
-2. OTHERWISE, WHEN the browser asks for a `zh` language, THE Console SHALL use Simplified Chinese, and for any other language it SHALL use English.
-3. THE Console SHALL offer a toggle in the top bar that switches the language and remembers the choice.
+2. OTHERWISE, THE Console SHALL start in English by default, regardless of system locale, so first-run screenshots, CLI demos and API answers are consistently English.
+3. THE Console SHALL offer a toggle in the top bar that switches between English and Simplified Chinese and remembers the choice.
 4. THE Console SHALL set the `lang` attribute of the document to the language in use.
-5. A browser whose storage is blocked SHALL still show the console.
+5. A browser whose storage is blocked SHALL still show the console in English.
 
 ### Requirement 3: Every visible text follows the language
 

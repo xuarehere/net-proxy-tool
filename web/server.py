@@ -2181,17 +2181,28 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
             else:
                 stop_local_gateway()
                 remove_local_gateway_record(cfg)
-        self.write_audit("local_gateway_" + action, "-", "success", "本机观测网关已{}".format(
-            "启动" if action == "start" else "停止"))
+        language = self.request_language()
+        status_msg = "本机观测网关已启动" if action == "start" else "本机观测网关已停止"
+        self.write_audit("local_gateway_" + action, "-", "success",
+                         messages.localize(status_msg, language))
         self.send_json(local_gateway_state())
 
     def handle_api_run(self):
+        language = self.request_language()
         payload = self.read_json_body()
         request = diagnostic_command(payload)
         cfg = load_config()
         gw = resolve_gateway_info(cfg, payload.get("gateway_id"))
         proxy = gateway_url(gw)
         result = run_diagnostic_request(request, proxy)
+        localized_result = dict(result)
+        if localized_result.get("error"):
+            localized_result["error"] = messages.localize(localized_result["error"], language)
+        if localized_result.get("preview"):
+            localized_result["preview"] = messages.localize(localized_result["preview"], language)
+        gw_name = gw["name"]
+        if gw.get("id") == "local-gateway" and gw_name in ("Local observation gateway", "本机观测网关"):
+            gw_name = messages.message("local-gateway-name", language)
         self.close_connection = True
         self.send_response(200)
         self.send_header("Connection", "close")
@@ -2199,12 +2210,13 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         events = [
             {"type": "start", "command": request["method"] + " " + request["url"],
-             "gateway": f"{gw['name']} ({proxy})", "time": time.strftime("%H:%M:%S")},
-            {"type": "result", **result},
-            {"type": "stdout", "line": result.get("headers", "")},
-            {"type": "stdout", "line": result.get("preview", "")},
+             "gateway": f"{gw_name} ({proxy})", "time": time.strftime("%H:%M:%S")},
+            {"type": "result", **localized_result},
+            {"type": "stdout", "line": localized_result.get("headers", "")},
+            {"type": "stdout", "line": localized_result.get("preview", "")},
             {"type": "finish", "exit_code": 0 if result.get("success") else 1,
-             "msg": "HTTP 请求完成" if result.get("success") else result.get("error", "请求失败")},
+             "msg": messages.localize("HTTP 请求完成", language) if result.get("success")
+             else localized_result.get("error", messages.localize("请求失败", language))},
         ]
         for event in events:
             self.wfile.write(f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8"))

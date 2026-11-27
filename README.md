@@ -22,7 +22,7 @@ The release checks run the downloaded packages on Windows x64, macOS 15 (Intel a
 
 1. **Extract the entire archive** and open its `net-proxy-tool` folder. On Windows, double-click `Start.bat`. On macOS or Linux, run `./net-proxy-tool` in that folder. The release archives include Python.
 2. In the browser, enter the **host and HTTP or mixed port** of a running proxy, then save it. Use `127.0.0.1` when the proxy client runs on the same computer. Read the port from that client’s settings.
-3. Click **发送代理请求** (Send proxy request). A successful HTTP status from your target completes the first request.
+3. Click **Send a proxy request**. A successful HTTP status from your target completes the first request.
 
 For checksums, source installation, shutdown and port conflicts, see the [quick start](QUICKSTART_EN.md). [Release assets and checksums](https://github.com/xuarehere/net-proxy-tool/releases/tag/v1.5.0)
 
@@ -36,7 +36,7 @@ The observation gateway reaches only ports 80 and 443, holds at most 64 tunnels 
 
 ## For coding agents
 
-`net-proxy-tool-mcp` serves the same diagnostics over the Model Context Protocol, so an agent can read your gateways, test one of them, list your nodes and run one command through the proxy. It is read-only: it never writes the configuration and never switches a node. See [the Kiro and agent guide](docs/kiro.md).
+`net-proxy-tool-mcp` serves the same diagnostics over the Model Context Protocol, so an agent can read your gateways, test one of them, list your nodes and run one command through the proxy. It is read-only: it never writes the configuration and never switches a node. See [the Kiro and agent guide](docs/kiro_en.md).
 
 ## Where requests travel
 

@@ -28,7 +28,7 @@ CONNECT_TIMEOUT = 10.0
 IDLE_TIMEOUT = 60.0
 RECORD_LIMIT = 200
 GATEWAY_ID = "local-gateway"
-GATEWAY_NAME = "本机观测网关"
+GATEWAY_NAME = "Local observation gateway"
 HOST_PATTERN = re.compile(r"[A-Za-z0-9._:%-]{1,253}")
 
 
@@ -118,7 +118,7 @@ class LocalGateway:
         """The gateway as the console's configuration understands it."""
         return {"id": GATEWAY_ID, "name": GATEWAY_NAME, "host": self.host,
                 "port": self.port or self.requested_port, "protocol": "http", "kind": "local",
-                "description": "随工具提供的本机观测网关，只监听回环地址。"}
+                "description": "Built-in local observation gateway listening on loopback only."}
 
     def records_list(self):
         """The recent connections, newest first."""
