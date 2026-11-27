@@ -9,7 +9,7 @@
   --border-focus: #38bdf8;
   --text-main: #f8fafc;
   --text-muted: #94a3b8;
-  --text-dim: #64748b;
+  --text-dim: #7f92a8;
   --primary: #38bdf8;
   --primary-hover: #0ea5e9;
   --primary-glow: rgba(56, 189, 248, 0.25);
@@ -1177,12 +1177,66 @@ body {
   color: var(--text-main);
 }
 
+.lang-toggle {
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.lang-toggle:hover {
+  color: var(--text-main);
+  border-color: var(--border-focus);
+}
+
+.local-gateway-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.local-gateway-text strong {
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+.local-gateway-text p {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.local-gateway-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#local-gateway-state {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
 .action-dropdown-menu {
   display: none;
-  position: absolute;
-  right: 0;
-  top: 100%;
-  margin-top: 4px;
+  /* Fixed, so that no table cell or card can cut the menu off. The script
+     places it next to its button and keeps it inside the viewport. */
+  position: fixed;
+  left: 0;
+  top: 0;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 8px;

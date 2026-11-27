@@ -17,13 +17,13 @@ ROOT = Path(__file__).resolve().parents[1]
 LOCK = json.loads((ROOT / "packaging/runtimes.lock.json").read_text(encoding="utf-8"))
 PREFIX = "net-proxy-tool/"
 FILES = """
-Start.bat runtime-select.cmd net-proxy-tool launcher.py with_proxy.py
-config.example.json LICENSE README.md README_EN.md QUICKSTART.md CHANGELOG.md SECURITY.md
-QUICKSTART_EN.md CONTRIBUTING.md docs/operations.md docs/operations_en.md docs/assets/console.png
+Start.bat runtime-select.cmd net-proxy-tool launcher.py with_proxy.py net_proxy_mcp.py
+config.example.json LICENSE README.md README.zh-CN.md QUICKSTART.md CHANGELOG.md SECURITY.md
+QUICKSTART_EN.md CONTRIBUTING.md docs/operations.md docs/operations_en.md docs/kiro.md docs/kiro_en.md docs/assets/console.png docs/assets/console.zh.png
 docs/assets/architecture.zh.svg docs/assets/architecture.en.svg docs/render_architecture.py
 install-cli.sh sdk/__init__.py sdk/config.py sdk/proxy_session.py
-web/start.bat web/stop.bat web/start.sh web/stop.sh web/server.py web/ssh_askpass.py web/node_probe.py web/node_baseline.py web/__init__.py web/provision.sh web/session_switch.sh web/container_helpers.sh
-web/static/index.html web/static/style.css web/static/app.js
+web/start.bat web/stop.bat web/start.sh web/stop.sh web/server.py web/ssh_askpass.py web/node_probe.py web/node_baseline.py web/diagnostics.py web/local_gateway.py web/messages.py web/__init__.py web/provision.sh web/session_switch.sh web/container_helpers.sh
+web/static/index.html web/static/style.css web/static/app.js web/static/i18n.js
 bin/with-proxy bin/with-proxy.ps1 bin/with-proxy.cmd bin/docker-proxy bin/docker-proxy-state.sh bin/with-proxy-docker
 bin/proxy-on bin/proxy-off bin/proxy-on.ps1 bin/proxy-off.ps1 bin/python-env.sh bin/session_env.py
 gateway-watchdog/watchdog.sh gateway-watchdog/install-watchdog.sh

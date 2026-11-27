@@ -60,6 +60,20 @@ docker compose ps
 docker compose logs --tail=80
 ```
 
+容器内的控制台监听所有网卡，因此**非回环来源的浏览器必须带访问令牌**。启动时日志会打印一条访问链接：
+
+```bash
+docker compose logs | grep "access link"
+```
+
+打开这条链接一次即可：控制台会下发一个 `npt_access` Cookie（HttpOnly、SameSite=Strict），之后的请求都凭它访问。也可以在启动 Compose 前设置固定令牌：
+
+```bash
+NET_PROXY_ACCESS_TOKEN=请替换为随机字符串 docker compose up -d --build
+```
+
+然后用 `http://127.0.0.1:8899/?token=请替换为随机字符串` 打开一次。
+
 在宿主机浏览器打开 `http://127.0.0.1:8899/`，停止时执行 `docker compose down`。容器内的 `127.0.0.1` 是容器自身。填入从容器可达的网关地址，并确认代理允许来自该网络的连接。需要使用其他宿主机端口时，在启动 Compose 前设置 `NET_PROXY_HOST_PORT`，并使用相应 URL。
 
 ## 根据症状定位
@@ -71,6 +85,7 @@ docker compose logs --tail=80
 | 中文 Windows 提示 `roxy-tool` 或 `2` 不是命令，双击后闪退 | 将 当前版本的 Windows ZIP 完整解压到新目录，使用包内根目录的 `Start.bat`。旧批处理在代码页 936 下可能截断命令。 |
 | 双击后没有显示页面 | 检查是否已完整解压、是否选对架构；从终端运行启动器查看错误。若已打印 URL，手动打开。 |
 | 8899 被占用 | 使用 8900 等空闲端口启动。若是本配置的实例，先用同一启动器的 `--stop` 停止。 |
+| 页面提示需要访问令牌 | 控制台监听在回环地址之外。打开启动日志中的访问链接，或设置 `NET_PROXY_ACCESS_TOKEN` 后重启。 |
 | 控制台能打开，但网关测试失败 | 核对代理监听地址和 HTTP/混合端口。TCP 不通时排查服务、监听接口及防火墙。仅 TCP 可达时，检查代理协议、上游路由和目标站点。 |
 | 收到 HTTP 407 | 代理要求认证。当前网关表单接受主机和端口，请使用你有权访问的 HTTP 转发入口。 |
 | HTTPS 证书错误或目标返回 403 / 429 | 确认目标 URL 与证书链，检查目标站点访问策略、限流和代理日志。 |

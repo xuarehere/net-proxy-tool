@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shlex
 import threading
 import socket
@@ -25,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -35,12 +37,153 @@ STATIC_DIR = WEB_DIR / "static"
 if __package__ in (None, ""):
     sys.path.insert(0, str(TOOL_DIR))
 
-from sdk.config import DEFAULT_TEST_URL, VERSION, data_dir, load_config, resolve_gateway_info, save_config
+from sdk.config import (DEFAULT_TEST_URL, VERSION, config_permission_warning, data_dir, load_config,
+                        proxy_url, resolve_gateway_info, rotate_log, save_config)
 from web import node_probe
 from web import node_baseline
+from web import diagnostics
+from web import messages
+from web.local_gateway import LocalGateway
 from web.ssh_askpass import password_environment
 
 CONFIG_WRITE_LOCK = threading.RLock()
+REQUEST_TIMEOUT_SECONDS = 60
+MAX_JSON_BODY_BYTES = 1024 * 1024
+MAX_DRAIN_BYTES = 4 * 1024 * 1024
+MAX_SAFE_INTEGER = (1 << 53) - 1
+AUDIT_LOG_LIMIT_BYTES = 5 * 1024 * 1024
+AUDIT_LOG_GENERATIONS = 3
+ACCESS_COOKIE_NAME = "npt_access"
+ACCESS_TOKEN_ENV = "NET_PROXY_ACCESS_TOKEN"
+# The console access state, resolved once when the server starts.
+ACCESS = {"token": "", "required": False, "printed": False}
+# The observation gateway the console owns.
+LOCAL_GATEWAY = {"instance": None, "record": None}
+
+
+class RequestError(ValueError):
+    """A client error with an explicit public HTTP status."""
+
+    def __init__(self, status_code, message):
+        super().__init__(message)
+        self.status_code = int(status_code)
+
+
+_STRING_FIELD_LIMITS = {
+    "id": 128,
+    "gateway_id": 128,
+    "node_id": 128,
+    "bound_gateway_id": 128,
+    "name": 255,
+    "host": 255,
+    "ssh_host": 255,
+    "os_type": 32,
+    "access_mode": 32,
+    "auth_type": 32,
+    "ssh_user": 128,
+    "ssh_pass": 4096,
+    "container_name": 128,
+    "description": 4096,
+    "no_proxy": 4096,
+    "protocol": 32,
+    "target_url": 8192,
+    "command": 8192,
+    "action": 16,
+}
+_INTEGER_FIELD_RANGES = {
+    "port": (1, 65535),
+    "node_revision": (-1, MAX_SAFE_INTEGER),
+    "binding_revision": (-1, MAX_SAFE_INTEGER),
+}
+_BOOLEAN_FIELDS = frozenset(("confirm_execution_mode",))
+
+
+def text_field(value, name, maximum=255, strip=False):
+    """Return a bounded JSON string or raise ValueError."""
+    if not isinstance(value, str):
+        raise ValueError("{} must be a string".format(name))
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("{} must contain valid Unicode".format(name)) from None
+    if "\x00" in value or len(value) > maximum:
+        raise ValueError("{} must be at most {} characters and contain no NUL".format(name, maximum))
+    return value.strip() if strip else value
+
+
+def integer_field(value, name, minimum=0, maximum=MAX_SAFE_INTEGER):
+    """Return a bounded integer; decimal strings are accepted, Booleans are not."""
+    if isinstance(value, bool):
+        raise ValueError("{} must be an integer".format(name))
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not re.fullmatch(r"[+-]?\d+", candidate):
+            raise ValueError("{} must be an integer".format(name))
+        value = int(candidate)
+    elif not isinstance(value, int):
+        raise ValueError("{} must be an integer".format(name))
+    if value < minimum or value > maximum:
+        raise ValueError("{} must be between {} and {}".format(name, minimum, maximum))
+    return value
+
+
+def boolean_field(value, name):
+    if not isinstance(value, bool):
+        raise ValueError("{} must be a Boolean".format(name))
+    return value
+
+
+def normalize_protocol(value):
+    protocol = text_field(value, "protocol", maximum=32, strip=True).lower()
+    if protocol != "http":
+        raise ValueError("请使用 HTTP 或 mixed 代理监听端口")
+    return protocol
+
+
+def validate_node_selections(value):
+    if not isinstance(value, list) or not value or len(value) > 256:
+        raise ValueError("nodes must be a non-empty array of at most 256 objects")
+    normalized = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("each nodes entry must be an object")
+        entry = dict(item)
+        if "node_id" in entry:
+            entry["node_id"] = text_field(entry["node_id"], "node_id", maximum=128)
+        for field in ("node_revision", "binding_revision"):
+            if field in entry:
+                bounds = _INTEGER_FIELD_RANGES[field]
+                entry[field] = integer_field(entry[field], field, bounds[0], bounds[1])
+        if "gateway_id" in entry:
+            entry["gateway_id"] = text_field(entry["gateway_id"], "gateway_id", maximum=128)
+        normalized.append(entry)
+    return normalized
+
+
+def validate_api_payload(path, payload):
+    """Normalize recognized API fields before any handler can use them."""
+    if not isinstance(payload, dict):
+        raise ValueError("请求体必须是 JSON 对象")
+    normalized = dict(payload)
+    for field, maximum in _STRING_FIELD_LIMITS.items():
+        if field in normalized:
+            normalized[field] = text_field(normalized[field], field, maximum=maximum)
+    for field, bounds in _INTEGER_FIELD_RANGES.items():
+        if field in normalized:
+            normalized[field] = integer_field(normalized[field], field, bounds[0], bounds[1])
+    for field in _BOOLEAN_FIELDS:
+        if field in normalized:
+            normalized[field] = boolean_field(normalized[field], field)
+    if "protocol" in normalized:
+        normalized["protocol"] = normalize_protocol(normalized["protocol"])
+    if "tags" in normalized:
+        tags = normalized["tags"]
+        if not isinstance(tags, list) or len(tags) > 64:
+            raise ValueError("tags must be an array of at most 64 strings")
+        normalized["tags"] = [text_field(tag, "tag", maximum=128) for tag in tags]
+    if "nodes" in normalized:
+        normalized["nodes"] = validate_node_selections(normalized["nodes"])
+    return normalized
 
 
 class ThreadingHTTPServer(HTTPServer):
@@ -49,6 +192,21 @@ class ThreadingHTTPServer(HTTPServer):
         # even when binding loopback. The console only needs the numeric address.
         TCPServer.server_bind(self)
         self.server_name, self.server_port = self.server_address[:2]
+
+
+def localize_messages(value, language):
+    """Localize the `error` and `message` fields of an API answer."""
+    if isinstance(value, dict):
+        result = {}
+        for key, child in value.items():
+            if key in ("error", "message") and isinstance(child, str):
+                result[key] = messages.localize(child, language)
+            else:
+                result[key] = localize_messages(child, language)
+        return result
+    if isinstance(value, list):
+        return [localize_messages(item, language) for item in value]
+    return value
 
 
 def audit_path():
@@ -60,19 +218,23 @@ def write_audit_log(action, node_id="-", status="info", details="", operator_ip=
     Appends an event record to the lightweight audit log in JSON Lines format.
     """
     try:
-        audit_path().parent.mkdir(parents=True, exist_ok=True)
+        path = audit_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rotate_log(path, AUDIT_LOG_LIMIT_BYTES, AUDIT_LOG_GENERATIONS)
+        client = operator_ip or "127.0.0.1"
         record = {
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "action": action,
             "node_id": node_id or "-",
-            "operator_ip": operator_ip or "127.0.0.1",
+            "operator_ip": client,
+            "client_address": client,
             "status": status,
             "details": str(details or "")
         }
-        with open(audit_path(), "a", encoding="utf-8") as f:
+        with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except Exception as e:
-        print(f"[Audit Log Warning] {e}")
+    except Exception as exc:
+        print("[Audit Log Warning] {}".format(type(exc).__name__), file=sys.stderr)
 
 
 def get_audit_logs(limit=60):
@@ -121,6 +283,162 @@ def is_local_host(host: str) -> bool:
         return False
 
 
+def is_loopback_client(address) -> bool:
+    """True for a loopback client, including an IPv4-mapped IPv6 address."""
+    if not address:
+        return False
+    name = str(address).strip().lower()
+    if name.startswith("::ffff:"):
+        name = name[len("::ffff:"):]
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False
+
+
+def console_host_names():
+    """Names and addresses that identify this machine, without a public DNS lookup.
+
+    The interface addresses are found by connecting an unbound UDP socket, which
+    selects a source address and sends no packet.
+    """
+    names = {"localhost", "127.0.0.1", "::1", socket.gethostname().lower()}
+    for family, probe_address in ((socket.AF_INET, "192.0.2.1"), (socket.AF_INET6, "2001:db8::1")):
+        try:
+            with socket.socket(family, socket.SOCK_DGRAM) as probe:
+                probe.connect((probe_address, 9))
+                names.add(probe.getsockname()[0])
+        except OSError:
+            continue
+    return names
+
+
+def allowed_host_names():
+    """The Host header names the console accepts.
+
+    A console that is published beyond loopback must also answer for the name
+    or address it was published under. A loopback console keeps its strict list.
+    """
+    names = {"localhost", "127.0.0.1", "::1"}
+    if ACCESS["required"]:
+        names |= console_host_names()
+    return names
+
+
+def host_addresses():
+    """The addresses of this machine, with the loopback ones marked.
+
+    An operator needs an address a remote node can reach, so the console can
+    report which of its own addresses are usable for a gateway.
+    """
+    entries = []
+    for name in sorted(console_host_names()):
+        try:
+            ipaddress.ip_address(name)
+        except ValueError:
+            continue
+        entries.append({"address": name, "loopback": is_loopback_client(name)})
+    entries.append({"name": socket.gethostname().lower(), "loopback": False})
+    return entries
+
+
+def local_gateway_state():
+    """The state of the observation gateway the console owns."""
+    instance = LOCAL_GATEWAY["instance"]
+    record = LOCAL_GATEWAY["record"]
+    running = bool(instance is not None and instance.running)
+    return {
+        "running": running,
+        "port": instance.port if running else (record or {}).get("port"),
+        "address": "127.0.0.1:{}".format(instance.port) if running else None,
+        "gateway": record,
+        "records": instance.records_list() if running else [],
+        "allowed_ports": sorted(instance.allowed_ports) if running else [],
+        "reachable": host_addresses(),
+    }
+
+
+def start_local_gateway():
+    """Start the observation gateway and return its configuration record."""
+    instance = LOCAL_GATEWAY["instance"]
+    if instance is not None and instance.running:
+        return LOCAL_GATEWAY["record"]
+    gateway = LocalGateway(port=0, allowed_ports=(80, 443))
+    port = gateway.start()
+    record = gateway.config_record()
+    record["port"] = port
+    LOCAL_GATEWAY["instance"] = gateway
+    LOCAL_GATEWAY["record"] = record
+    return record
+
+
+def stop_local_gateway():
+    """Stop the observation gateway and forget its record."""
+    instance = LOCAL_GATEWAY["instance"]
+    if instance is not None:
+        instance.stop()
+    LOCAL_GATEWAY["instance"] = None
+    LOCAL_GATEWAY["record"] = None
+
+
+def save_local_gateway_record(cfg, record):
+    """Add or refresh the local gateway record in the configuration."""
+    gateways = [item for item in cfg.get("gateways", []) if item.get("id") != record["id"]]
+    gateways.append(record)
+    cfg["gateways"] = gateways
+    if not cfg.get("active_gateway_id"):
+        cfg["active_gateway_id"] = record["id"]
+        for item in gateways:
+            item["is_default"] = item.get("id") == record["id"]
+    save_config(cfg)
+    return cfg
+
+
+def remove_local_gateway_record(cfg):
+    """Remove the local gateway record from the configuration."""
+    gateways = [item for item in cfg.get("gateways", []) if item.get("id") != "local-gateway"]
+    removed = len(gateways) != len(cfg.get("gateways", []))
+    cfg["gateways"] = gateways
+    if cfg.get("active_gateway_id") == "local-gateway":
+        cfg["active_gateway_id"] = gateways[0].get("id", "") if gateways else ""
+        for item in gateways:
+            item["is_default"] = item.get("id") == cfg["active_gateway_id"]
+    if removed:
+        save_config(cfg)
+    return cfg
+
+
+def resolve_access_token(bind_host):
+    """Return the access token for this console and whether one is required."""
+    configured = (os.environ.get(ACCESS_TOKEN_ENV) or "").strip()
+    if configured:
+        return configured, True
+    if is_loopback_client(bind_host):
+        return "", False
+    return secrets.token_urlsafe(32), True
+
+
+def access_link_host(bind_host):
+    """The address a published console is reached at, for the printed access link."""
+    if bind_host not in ("0.0.0.0", "::", ""):
+        return bind_host
+    for family, probe_address in ((socket.AF_INET, "192.0.2.1"), (socket.AF_INET6, "2001:db8::1")):
+        try:
+            with socket.socket(family, socket.SOCK_DGRAM) as probe:
+                probe.connect((probe_address, 9))
+                address = probe.getsockname()[0]
+            if not is_loopback_client(address):
+                return address
+        except OSError:
+            continue
+    return socket.gethostname().lower()
+
+
+def redact_access_token(text):
+    """Hide the access token in a request line before it is logged."""
+    return re.sub(r"([?&]token=)[^&\s]*", r"\1<redacted>", str(text))
+
+
 def check_tcp_port(host: str, port: int, timeout: float = 1.5):
     t0 = time.time()
     try:
@@ -145,18 +463,18 @@ def diagnostic_url(value):
 
 def diagnostic_command(payload):
     """Parse an HTTP GET description without invoking a shell or executable."""
+    if not isinstance(payload, dict):
+        raise ValueError("请求必须是 JSON 对象")
     if payload.get("target_url") and payload.get("command"):
         raise ValueError("请提供 target_url 或请求文本中的一个")
     text = payload.get("target_url") or payload.get("command", "")
     if not isinstance(text, str):
         raise ValueError("请求必须是 URL 或 curl GET 文本")
+    if re.search(r"\$\(|\$\{|\x60|\n|\r", text):
+        raise ValueError("请求中不支持 shell 插值或换行，请提供完整的单行 URL")
     text = text.strip()
-    if re.search(r"\$\(|\$\{|\x60", text):
-        raise ValueError("请求中不支持 shell 插值，请提供完整 URL")
     if text.startswith(("http://", "https://")):
         return {"url": urllib.parse.urlunsplit(diagnostic_url(text)), "method": "GET"}
-    if "\n" in text or "\r" in text:
-        raise ValueError("请求必须为单行")
     args = shlex.split(text, posix=True)
     if not args or args.pop(0).lower() not in ("curl", "curl.exe"):
         raise ValueError("此面板仅接受 HTTP(S) URL 或 curl GET 请求；其他业务命令请使用 CLI")
@@ -260,7 +578,9 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 1
                         conn.sock.settimeout(remaining_time())
                         conn.sock = context.wrap_socket(conn.sock, server_hostname=target.hostname)
                         attempt["tls"] = "passed"
-                    except ssl.SSLEOFError as exc:
+                    except (ssl.SSLEOFError, ssl.SSLZeroReturnError) as exc:
+                        # The peer closed the TLS connection. Python 3.8 reports it as
+                        # SSLZeroReturnError and newer versions as SSLEOFError.
                         attempt["tls"] = "eof"
                         attempt["elapsed_ms"] = round((time.monotonic() - attempt_started) * 1000, 1)
                         conn.close()
@@ -417,6 +737,10 @@ def run_diagnostic_request(request, proxy_url):
 
 
 def validate_host_port(host, port):
+    host = text_field(host, "host", maximum=255, strip=True)
+    port = integer_field(port, "port", 1, 65535)
+    if not host:
+        raise ValueError("请输入有效的代理主机名或 IP 地址")
     if ":" in host:
         address, sep, zone = host.partition("%")
         ipaddress.IPv6Address(address)
@@ -424,22 +748,20 @@ def validate_host_port(host, port):
             raise ValueError("无效的 IPv6 区域标识")
     elif not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", host):
         raise ValueError("请输入有效的代理主机名或 IP 地址")
-    if not 1 <= int(port) <= 65535:
-        raise ValueError("端口必须在 1 至 65535 之间")
+    return host, port
 
 
 def gateway_url(gw):
-    if not gw:
+    if not isinstance(gw, dict) or not gw:
         raise ValueError("请先添加 HTTP 代理网关")
-    if gw.get("protocol", "http") != "http":
-        raise ValueError("请使用 HTTP 或 mixed 代理监听端口")
-    host, port = gw["host"], int(gw["port"])
-    validate_host_port(host, port)
-    return f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
+    normalize_protocol(gw.get("protocol", "http"))
+    host, port = validate_host_port(gw.get("host"), gw.get("port"))
+    return proxy_url(host, port)
 
 
 def validate_bypass(value):
-    if not isinstance(value, str) or not re.fullmatch(r"[\w.,*:/%\[\]-]*", value):
+    value = text_field(value, "no_proxy", maximum=4096)
+    if not re.fullmatch(r"[\w.,*:/%\[\]-]*", value):
         raise ValueError("直连列表应为以逗号分隔的主机、IP 或网段")
     return value
 
@@ -495,10 +817,13 @@ def generate_provisioning_script(proxy_url, no_proxy, action="on", owner=""):
 
 def validate_ssh_destination(host, user, container=None):
     validate_host_port(host, 22)
+    user = text_field(user, "ssh_user", maximum=128)
     if not re.fullmatch(r"[a-zA-Z0-9_][a-zA-Z0-9_.-]*", user):
         raise ValueError("无效的 SSH 用户名")
-    if container is not None and not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", container):
-        raise ValueError("无效的 Docker 容器名称")
+    if container is not None:
+        container = text_field(container, "container_name", maximum=128)
+        if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", container):
+            raise ValueError("无效的 Docker 容器名称")
 
 
 def docker_ssh_command(target, *command):
@@ -655,22 +980,32 @@ def selected_node_gateway(target, cfg, request):
 
 
 def validate_client(target, cfg=None):
-    mode = target.get("access_mode", "ssh")
+    if not isinstance(target, dict):
+        raise ValueError("node must be an object")
+    mode = text_field(target.get("access_mode", "ssh"), "access_mode", maximum=32)
     if mode not in ("ssh", "docker_host", "local"):
         raise ValueError("请选择 SSH、Docker 宿主机或明确的本机执行模式。")
-    if target.get("auth_type", "key") not in ("key", "password"):
+    auth_type = text_field(target.get("auth_type", "key"), "auth_type", maximum=32)
+    if auth_type not in ("key", "password"):
         raise ValueError("请选择密钥或密码认证。")
-    if mode == "local" and not is_local_host(target.get("host")):
+    host, port = validate_host_port(target.get("host"), target.get("port", 22))
+    if mode == "local" and not is_local_host(host):
         raise ValueError("本机模式仅接受控制台所在机器的地址。")
-    validate_host_port(target["host"], target.get("port", 22))
     if mode == "docker_host":
-        validate_ssh_destination(target.get("ssh_host") or target["host"], target.get("ssh_user") or "ubuntu",
+        ssh_host = target.get("ssh_host") or host
+        validate_host_port(ssh_host, port)
+        validate_ssh_destination(ssh_host, target.get("ssh_user") or "ubuntu",
                                  target.get("container_name") or "")
     elif mode != "local":
-        validate_ssh_destination(target["host"], target.get("ssh_user") or "root")
+        validate_ssh_destination(host, target.get("ssh_user") or "root")
     if cfg is not None and target.get("bound_gateway_id"):
-        if not resolve_gateway_info(cfg, target["bound_gateway_id"]):
+        bound = text_field(target["bound_gateway_id"], "bound_gateway_id", maximum=128)
+        gateway = resolve_gateway_info(cfg, bound)
+        if not gateway:
             raise ValueError("绑定的网关不存在，请重新选择并保存。")
+        if gateway.get("kind") == "local" and mode != "local":
+            raise ValueError("本机观测网关只监听回环地址，远程节点无法访问；请为远程节点选择可达的网关。")
+    return target
 
 
 def apply_node_proxy(target, action, cfg):
@@ -914,6 +1249,68 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
 
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(REQUEST_TIMEOUT_SECONDS)
+
+    def log_request(self, code="-", size="-"):
+        # The access link carries the token in the query string; it must not
+        # reach the console log.
+        self.log_message('"%s" %s %s', redact_access_token(self.requestline), str(code), str(size))
+
+    def cookie_value(self, name):
+        for part in (self.headers.get("Cookie", "") or "").split(";"):
+            key, _, value = part.strip().partition("=")
+            if key == name:
+                return value
+        return ""
+
+    def send_access_granted(self, token):
+        self.send_response(302)
+        self.send_header("Location", "/")
+        self.send_header("Set-Cookie", "{}={}; HttpOnly; SameSite=Strict; Path=/".format(
+            ACCESS_COOKIE_NAME, token))
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def send_access_denied(self):
+        body = ("This console requires an access token. Open the access link printed in the "
+                "console log, or set NET_PROXY_ACCESS_TOKEN and restart the console.\n"
+                "此控制台需要访问令牌。请打开控制台日志中打印的访问链接，"
+                "或设置 NET_PROXY_ACCESS_TOKEN 后重启控制台。\n").encode("utf-8")
+        self.send_response(401)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def authorize_access(self):
+        """Allow loopback clients; require the access token from everyone else."""
+        if not ACCESS["required"]:
+            return True
+        if is_loopback_client(self.client_address[0]):
+            return True
+        token = ACCESS["token"]
+        cookie = self.cookie_value(ACCESS_COOKIE_NAME)
+        if cookie and hmac.compare_digest(cookie, token):
+            return True
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in ("", "/"):
+            supplied = (urllib.parse.parse_qs(parsed.query).get("token") or [""])[0]
+            if supplied and hmac.compare_digest(supplied, token):
+                self.send_access_granted(token)
+            else:
+                self.send_access_denied()
+            return False
+        self.send_access_denied()
+        return False
+
+    def write_audit(self, action, node_id="-", status="info", details=""):
+        """Record an audit entry for the client that made this request."""
+        address = getattr(self, "client_address", None)
+        write_audit_log(action, node_id, status, details,
+                        operator_ip=address[0] if address else "127.0.0.1")
+
     def end_headers(self):
         # 强制所有静态文件与动态接口下发防缓存头，杜绝浏览器脏缓存假死
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0")
@@ -924,12 +1321,20 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def send_json(self, data, status_code=200):
-        payload = json.dumps(public_data(data), ensure_ascii=False).encode("utf-8")
+        payload = json.dumps(public_data(localize_messages(data, self.request_language())),
+                             ensure_ascii=False).encode("utf-8")
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
+
+    def request_language(self):
+        """The language the browser asked for in its last request."""
+        try:
+            return messages.normalize_language(self.headers.get("X-NPT-Language", ""))
+        except Exception:
+            return messages.DEFAULT_LANGUAGE
 
     def send_text(self, text, content_type="text/plain; charset=utf-8", status_code=200):
         payload = text.encode("utf-8")
@@ -939,18 +1344,68 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def send_internal_error(self, exc):
+        error_id = secrets.token_hex(8)
+        print("[Internal Error {}] {}".format(error_id, type(exc).__name__), file=sys.stderr)
+        frames = traceback.format_tb(exc.__traceback__)
+        if frames:
+            print("".join(frames).rstrip(), file=sys.stderr)
+        self.send_json({"success": False, "error": "Internal server error", "error_id": error_id}, 500)
+
     def read_json_body(self):
-        content_length = int(self.headers.get("Content-Length", 0))
-        if content_length <= 0:
-            return {}
-        if content_length > 1024 * 1024:
+        if hasattr(self, "_request_json"):
+            return self._request_json
+        transfer_encoding = self.headers.get_all("Transfer-Encoding", [])
+        if transfer_encoding:
             self.close_connection = True
-            raise ValueError("请求体过大")
-        post_data = self.rfile.read(content_length).decode("utf-8")
-        data = json.loads(post_data)
+            raise RequestError(400, "Transfer-Encoding is not supported")
+        content_types = self.headers.get_all("Content-Type", [])
+        if len(content_types) > 1:
+            self.close_connection = True
+            raise RequestError(400, "At most one Content-Type header is allowed")
+        if not content_types or self.headers.get_content_type() != "application/json":
+            self.close_connection = True
+            raise RequestError(415, "Content-Type must be application/json")
+        length_headers = self.headers.get_all("Content-Length", [])
+        if len(length_headers) != 1:
+            self.close_connection = True
+            raise RequestError(400, "Exactly one Content-Length header is required")
+        raw_length = length_headers[0]
+        if not re.fullmatch(r"\d+", raw_length.strip()):
+            self.close_connection = True
+            raise RequestError(400, "Content-Length must be a non-negative integer")
+        content_length = int(raw_length)
+        if content_length > MAX_JSON_BODY_BYTES:
+            # Read and drop the body first, so that a client which is still
+            # sending can read the answer instead of a connection reset.
+            self.drain_body(content_length)
+            self.close_connection = True
+            raise RequestError(413, "请求体过大")
+        if content_length == 0:
+            return {}
+        try:
+            post_data = self.rfile.read(content_length).decode("utf-8")
+        except UnicodeDecodeError:
+            raise RequestError(400, "请求体必须是 UTF-8 JSON")
+        try:
+            data = json.loads(post_data)
+        except (ValueError, RecursionError):
+            raise RequestError(400, "请求体包含无效 JSON")
         if not isinstance(data, dict):
-            raise ValueError("请求体必须是 JSON 对象")
+            raise RequestError(400, "请求体必须是 JSON 对象")
         return data
+
+    def drain_body(self, content_length):
+        """Read and drop a body that is too large, up to a bounded amount."""
+        remaining = min(int(content_length), MAX_DRAIN_BYTES)
+        try:
+            while remaining > 0:
+                chunk = self.rfile.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except OSError:
+            pass
 
     def parse_request(self):
         if not super().parse_request():
@@ -960,7 +1415,7 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
             parsed = urllib.parse.urlsplit("//" + host)
             if parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
                 raise ValueError()
-            allowed = {"localhost", "127.0.0.1", "::1", self.connection.getsockname()[0]}
+            allowed = allowed_host_names() | {self.connection.getsockname()[0]}
             # A published container port can be forwarded from a different local IP.
             if parsed.hostname not in allowed:
                 raise ValueError()
@@ -973,13 +1428,21 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
             self.close_connection = True
             self.send_error(403, "Untrusted Host or Origin")
             return False
+        if not self.authorize_access():
+            return False
         return True
 
     def do_GET(self):
         try:
             self.serve_get()
+        except RequestError as exc:
+            self.send_json({"success": False, "error": str(exc)}, exc.status_code)
         except ValueError as exc:
             self.send_json({"success": False, "error": str(exc)}, 400)
+        except (socket.timeout, TimeoutError):
+            self.close_connection = True
+        except Exception as exc:
+            self.send_internal_error(exc)
 
     def serve_get(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -1021,6 +1484,25 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
             self.send_json({"success": True, "logs": get_audit_logs(60)})
             return
 
+        if path == "/api/host-addresses":
+            addresses = host_addresses()
+            self.send_json({"addresses": addresses, "count": len(addresses)})
+            return
+
+        if path == "/api/local-gateway":
+            self.send_json(local_gateway_state())
+            return
+
+        if path == "/api/i18n.js":
+            script = messages.catalogue_script().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Content-Length", str(len(script)))
+            self.end_headers()
+            self.wfile.write(script)
+            return
+
         if path == "/api/status":
             self.handle_api_status(parsed.query)
             return
@@ -1048,23 +1530,32 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
             "/api/gateways/add": self.handle_gateway_add,
             "/api/gateways/update": self.handle_gateway_update,
             "/api/gateways/delete": self.handle_gateway_delete,
+            "/api/local-gateway": self.handle_local_gateway,
             "/api/run": self.handle_api_run
         }
 
         if path in handlers:
             try:
+                self._request_json = validate_api_payload(path, self.read_json_body())
                 # Serialize read-modify-write updates, including switch results.
                 if path in ("/api/config", "/api/set-active-gateway", "/api/node-switch", "/api/nodes/batch-switch") or path.startswith(("/api/clients/", "/api/gateways/")):
                     with CONFIG_WRITE_LOCK:
                         handlers[path]()
                 else:
                     handlers[path]()
-            except NodeBindingConflict as e:
-                self.send_json({"success": False, "error": str(e), "binding_changed": True}, status_code=409)
-            except (ValueError, KeyError, TypeError) as e:
-                self.send_json({"success": False, "error": str(e)}, status_code=400)
-            except Exception as e:
-                self.send_json({"success": False, "error": str(e)}, status_code=500)
+            except RequestError as exc:
+                self.send_json({"success": False, "error": str(exc)}, status_code=exc.status_code)
+            except NodeBindingConflict as exc:
+                self.send_json({"success": False, "error": str(exc), "binding_changed": True}, status_code=409)
+            except (ValueError, KeyError) as exc:
+                self.send_json({"success": False, "error": str(exc)}, status_code=400)
+            except (socket.timeout, TimeoutError):
+                self.close_connection = True
+            except Exception as exc:
+                self.send_internal_error(exc)
+            finally:
+                if hasattr(self, "_request_json"):
+                    del self._request_json
             return
 
         self.send_error(404, "Not Found")
@@ -1084,44 +1575,13 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         gid = query.get("gateway_id", [None])[0]
 
         cfg = load_config()
-        gw = resolve_gateway_info(cfg, gid)
-        if not gw:
-            self.send_json({"gateway": None, "targets": [], "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "error": "未找到网关，请先在首页保存 HTTP 代理网关。"}, 404 if gid else 200)
+        report = diagnostics.status_report(cfg, gid, tcp_probe=check_tcp_port,
+                                           target_probe=check_http_target)
+        if report["gateway"] is None:
+            self.send_json(dict(report, error="未找到网关，请先在首页保存 HTTP 代理网关。"),
+                           404 if gid else 200)
             return
-        host, port = gw["host"], int(gw["port"])
-        proxy_url = gateway_url(gw)
-
-        gw_ok, gw_rtt = check_tcp_port(host, port)
-        results = {
-            "gateway": {
-                "id": gw.get("id"),
-                "name": gw.get("name"),
-                "host": host,
-                "port": port,
-                "online": False,
-                "tcp_ok": gw_ok,
-                "path_verified": False,
-                "latency_ms": gw_rtt if gw_ok else None,
-                "error": None if gw_ok else str(gw_rtt)
-            },
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "targets": []
-        }
-
-        if gw_ok:
-            targets = cfg.get("diagnostic_targets", {})
-            with ThreadPoolExecutor(max_workers=7) as pool:
-                futures = [
-                    pool.submit(check_http_target, name, info, proxy_url)
-                    for name, info in targets.items()
-                ]
-                for f in futures:
-                    results["targets"].append(f.result())
-            results["gateway"]["online"] = any(t.get("http_ok") for t in results["targets"])
-            results["gateway"]["path_verified"] = any(t.get("path_verified") for t in results["targets"])
-
-        self.send_json(results)
+        self.send_json(report)
 
     def handle_save_config(self):
         req_json = self.read_json_body()
@@ -1147,9 +1607,9 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
 
     def handle_test_gateway(self):
         req_json = self.read_json_body()
-        host = req_json.get("host", "").strip()
-        port = int(req_json.get("port", 0))
-        proxy = gateway_url({"host": host, "port": port, "protocol": req_json.get("protocol", "http")})
+        host, port = validate_host_port(req_json.get("host"), req_json.get("port", 0))
+        protocol = normalize_protocol(req_json.get("protocol", "http"))
+        proxy = gateway_url({"host": host, "port": port, "protocol": protocol})
         url = req_json.get("target_url") or DEFAULT_TEST_URL
         diagnostic_url(url)
         result = check_http_target("HTTP probe", url, proxy)
@@ -1158,11 +1618,7 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
 
     def handle_test_host(self):
         req_json = self.read_json_body()
-        host = req_json.get("host", "").strip()
-        port = int(req_json.get("port", 22))  # Default check port 22 or 80
-        if not host:
-            self.send_json({"success": False, "error": "Host IP required"}, status_code=400)
-            return
+        host, port = validate_host_port(req_json.get("host"), req_json.get("port", 22))
         ok, rtt_or_err = check_tcp_port(host, port, timeout=2.0)
         self.send_json({"success": True, "online": ok, "latency_ms": rtt_or_err if ok else None, "error": None if ok else str(rtt_or_err)})
 
@@ -1363,7 +1819,7 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         if archived:
             cfg["archived_clients"] = [item for item in cfg.get("archived_clients", []) if item is not archived]
         save_config(cfg)
-        write_audit_log("client_add", target["id"], "success", "节点登记已保存")
+        self.write_audit("client_add", target["id"], "success", "节点登记已保存")
         self.send_json({"success": True, "restored_registration": bool(archived), "client": node_public_state(target),
                         "message": "原节点登记和可用绑定已恢复；认证资料使用本次输入。" if archived else "节点登记已保存，尚未开启代理。"})
 
@@ -1424,7 +1880,7 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         target.clear()
         target.update(draft)
         save_config(cfg)
-        write_audit_log("client_update", target["id"], "success", "节点登记已更新")
+        self.write_audit("client_update", target["id"], "success", "节点登记已更新")
         self.send_json({"success": True, "client": node_public_state(target), "message": "节点登记已更新。"})
 
     def handle_client_delete(self):
@@ -1447,7 +1903,7 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         cfg["archived_clients"] = [item for item in cfg.get("archived_clients", []) if item.get("id") != target["id"]] + [archive]
         cfg["clients"] = [item for item in cfg["clients"] if item is not target]
         save_config(cfg)
-        write_audit_log("client_delete", target["id"], "success", "节点登记已移除，认证资料已删除")
+        self.write_audit("client_delete", target["id"], "success", "节点登记已移除，认证资料已删除")
         self.send_json({"success": True, "id": target["id"], "message": "节点登记已移除，认证资料已删除；仅保留加回所需的非敏感登记信息。"})
 
     def handle_node_switch(self):
@@ -1469,7 +1925,8 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         update_node_outcome(target, action, result)
         save_config(cfg)
         ok = result.get("returncode") == 0
-        write_audit_log("node_switch_" + action, target["id"], "success" if ok else "failed", "节点操作已核验" if ok else "核验未确认，登记保留")
+        self.write_audit("node_switch_" + action, target["id"], "success" if ok else "failed",
+                         "节点操作已核验" if ok else "核验未确认，登记保留")
         self.send_json({"success": ok, "node_id": target["id"], "action": action,
                         "node_revision": node_revision(target), "binding_revision": target.get("binding_revision", 0),
                         "gateway_id": target.get("bound_gateway_id"), "is_proxy_enabled": target.get("is_proxy_enabled", False),
@@ -1511,7 +1968,8 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
             results.append({"node_id": target["id"], "name": target.get("name", target["id"]), "success": ok,
                             "managed_state": target["managed_state"], "verification": target["verification"],
                             "node_revision": node_revision(target), "error": result.get("error")})
-            write_audit_log("batch_" + action, target["id"], "success" if ok else "failed", "已核验" if ok else "未核验")
+            self.write_audit("batch_" + action, target["id"], "success" if ok else "failed",
+                             "已核验" if ok else "未核验")
         count = sum(item["success"] for item in results)
         self.send_json({"success": count == len(results), "action": action, "results": results,
                         "total": len(results), "success_count": count,
@@ -1538,7 +1996,8 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
                                                 error="巡检期间节点绑定已变化，请重新测试。")
         passed = sum(bool(item.get("success")) for item in health_map.values())
         outcome = "success" if passed == len(clients) else "partial" if passed else "failed"
-        write_audit_log("health_check_all", "-", outcome, f"巡检完成，{passed}/{len(clients)} 个节点两路 HTTP 请求成功")
+        self.write_audit("health_check_all", "-", outcome,
+                         f"巡检完成，{passed}/{len(clients)} 个节点两路 HTTP 请求成功")
         self.send_json({"success": True, "completed": True, "all_http_ok": passed == len(clients),
                         "health_map": health_map, "target_url": url, "total": len(clients),
                         "http_success_count": sum(bool(item.get("online")) for item in health_map.values()),
@@ -1573,14 +2032,13 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
 
     def handle_gateway_add(self):
         req_json = self.read_json_body()
-        gid = req_json.get("id", "").strip()
-        name = req_json.get("name", "").strip()
-        host = req_json.get("host", "").strip()
-        port = int(req_json.get("port", 7890))
-        protocol = req_json.get("protocol", "http").strip().lower()
-        desc = req_json.get("description", "").strip()
+        gid = text_field(req_json.get("id", ""), "id", maximum=128, strip=True)
+        name = text_field(req_json.get("name", ""), "name", maximum=255, strip=True)
+        host, port = validate_host_port(req_json.get("host"), req_json.get("port", 7890))
+        protocol = normalize_protocol(req_json.get("protocol", "http"))
+        desc = text_field(req_json.get("description", ""), "description", maximum=4096, strip=True)
 
-        if not name or not host:
+        if not name:
             self.send_json({"success": False, "error": "网关名称和IP不能为空"}, status_code=400)
             return
 
@@ -1630,7 +2088,7 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
 
     def handle_gateway_update(self):
         req_json = self.read_json_body()
-        gid = req_json.get("id", "").strip()
+        gid = text_field(req_json.get("id", ""), "id", maximum=128, strip=True)
         if not gid:
             self.send_json({"success": False, "error": "网关ID不能为空"}, status_code=400)
             return
@@ -1638,24 +2096,39 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         cfg = load_config()
         gateways = cfg.get("gateways", [])
         target = None
-        for g in gateways:
-            if g.get("id") == gid:
-                target = g
+        for gateway in gateways:
+            if gateway.get("id") == gid:
+                target = gateway
                 break
 
         if not target:
             self.send_json({"success": False, "error": f"未找到ID为 '{gid}' 的网关"}, status_code=404)
             return
 
-        previous_endpoint = tuple(str(target.get(key, "http" if key == "protocol" else "")) for key in ("host", "port", "protocol"))
-        if "name" in req_json: target["name"] = req_json["name"].strip()
-        if "host" in req_json: target["host"] = req_json["host"].strip()
-        if "port" in req_json: target["port"] = int(req_json["port"])
-        if "protocol" in req_json: target["protocol"] = req_json["protocol"].strip()
-        if "description" in req_json: target["description"] = req_json["description"].strip()
+        previous_endpoint = tuple(str(target.get(key, "http" if key == "protocol" else "")).strip().lower()
+                                  if key == "protocol" else str(target.get(key, "")).strip()
+                                  for key in ("host", "port", "protocol"))
+        draft = copy.deepcopy(target)
+        if "name" in req_json:
+            draft["name"] = text_field(req_json["name"], "name", maximum=255, strip=True)
+        if "host" in req_json:
+            draft["host"] = text_field(req_json["host"], "host", maximum=255, strip=True)
+        if "port" in req_json:
+            draft["port"] = integer_field(req_json["port"], "port", 1, 65535)
+        if "protocol" in req_json:
+            draft["protocol"] = normalize_protocol(req_json["protocol"])
+        if "description" in req_json:
+            draft["description"] = text_field(req_json["description"], "description", maximum=4096,
+                                               strip=True)
 
-        gateway_url(target)
-        if previous_endpoint != tuple(str(target.get(key, "http" if key == "protocol" else "")) for key in ("host", "port", "protocol")):
+        draft["host"], draft["port"] = validate_host_port(draft.get("host"), draft.get("port"))
+        draft["protocol"] = normalize_protocol(draft.get("protocol", "http"))
+        gateway_url(draft)
+        endpoint = tuple(str(draft.get(key, "http" if key == "protocol" else ""))
+                         for key in ("host", "port", "protocol"))
+        target.clear()
+        target.update(draft)
+        if previous_endpoint != endpoint:
             for node in cfg.get("clients", []):
                 if node.get("bound_gateway_id") == gid:
                     node["node_revision"] = node_revision(node) + 1
@@ -1690,13 +2163,46 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         save_config(cfg)
         self.send_json({"success": True, "message": "代理网关删除成功", "id": gid})
 
+    def handle_local_gateway(self):
+        """Start or stop the observation gateway the console owns."""
+        request = self.read_json_body()
+        action = request.get("action")
+        if action not in ("start", "stop"):
+            raise ValueError("action 必须是 start 或 stop")
+        with CONFIG_WRITE_LOCK:
+            cfg = load_config()
+            if action == "start":
+                record = start_local_gateway()
+                try:
+                    save_local_gateway_record(cfg, record)
+                except Exception:
+                    stop_local_gateway()
+                    raise
+            else:
+                stop_local_gateway()
+                remove_local_gateway_record(cfg)
+        language = self.request_language()
+        status_msg = "本机观测网关已启动" if action == "start" else "本机观测网关已停止"
+        self.write_audit("local_gateway_" + action, "-", "success",
+                         messages.localize(status_msg, language))
+        self.send_json(local_gateway_state())
+
     def handle_api_run(self):
+        language = self.request_language()
         payload = self.read_json_body()
         request = diagnostic_command(payload)
         cfg = load_config()
         gw = resolve_gateway_info(cfg, payload.get("gateway_id"))
         proxy = gateway_url(gw)
         result = run_diagnostic_request(request, proxy)
+        localized_result = dict(result)
+        if localized_result.get("error"):
+            localized_result["error"] = messages.localize(localized_result["error"], language)
+        if localized_result.get("preview"):
+            localized_result["preview"] = messages.localize(localized_result["preview"], language)
+        gw_name = gw["name"]
+        if gw.get("id") == "local-gateway" and gw_name in ("Local observation gateway", "本机观测网关"):
+            gw_name = messages.message("local-gateway-name", language)
         self.close_connection = True
         self.send_response(200)
         self.send_header("Connection", "close")
@@ -1704,12 +2210,13 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         events = [
             {"type": "start", "command": request["method"] + " " + request["url"],
-             "gateway": f"{gw['name']} ({proxy})", "time": time.strftime("%H:%M:%S")},
-            {"type": "result", **result},
-            {"type": "stdout", "line": result.get("headers", "")},
-            {"type": "stdout", "line": result.get("preview", "")},
+             "gateway": f"{gw_name} ({proxy})", "time": time.strftime("%H:%M:%S")},
+            {"type": "result", **localized_result},
+            {"type": "stdout", "line": localized_result.get("headers", "")},
+            {"type": "stdout", "line": localized_result.get("preview", "")},
             {"type": "finish", "exit_code": 0 if result.get("success") else 1,
-             "msg": "HTTP 请求完成" if result.get("success") else result.get("error", "请求失败")},
+             "msg": messages.localize("HTTP 请求完成", language) if result.get("success")
+             else localized_result.get("error", messages.localize("请求失败", language))},
         ]
         for event in events:
             self.wfile.write(f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8"))
@@ -1720,8 +2227,27 @@ def run_server(port=None, bind=None):
     cfg = load_config()
     port = port if port is not None else int(cfg.get("web_port", 8899))
     host = bind or os.environ.get("NET_PROXY_BIND", "127.0.0.1")
+    token, required = resolve_access_token(host)
+    ACCESS.update(token=token, required=required)
+    warning = config_permission_warning()
+    if warning:
+        print(warning, file=sys.stderr, flush=True)
+    if any(item.get("id") == "local-gateway" for item in cfg.get("gateways", [])):
+        # The operator kept the observation gateway, so it runs again with a fresh port.
+        try:
+            record = start_local_gateway()
+            save_local_gateway_record(load_config(), record)
+            print("net-proxy-tool | local observation gateway on 127.0.0.1:{}".format(record["port"]),
+                  flush=True)
+        except (OSError, ValueError) as exc:
+            print("net-proxy-tool | the local observation gateway did not start: {}".format(
+                type(exc).__name__), file=sys.stderr, flush=True)
     with ThreadingHTTPServer((host, port), ProxyConsoleHandler) as httpd:
         print(f"net-proxy-tool | http://{host}:{httpd.server_port}", flush=True)
+        if required and not ACCESS["printed"]:
+            ACCESS["printed"] = True
+            print("net-proxy-tool | access link: http://{}:{}/?token={}".format(
+                access_link_host(host), httpd.server_port, token), flush=True)
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:

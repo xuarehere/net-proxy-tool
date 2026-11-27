@@ -26,7 +26,7 @@ When changing packaging, build and install a wheel in a clean virtual environmen
 
 ## Documentation and artwork
 
-Keep the [Chinese](README.md) and [English](README_EN.md) download tables and quick starts in sync with the release asset names and command output. Both architecture diagrams are generated from [one Python source](docs/render_architecture.py). After editing its labels or layout, regenerate both assets.
+Keep the [English](README.md) and [Chinese](README.zh-CN.md) download tables and quick starts in sync with the release asset names and command output. Both architecture diagrams are generated from [one Python source](docs/render_architecture.py). After editing its labels or layout, regenerate both assets.
 
 ```console
 python docs/render_architecture.py

@@ -137,6 +137,9 @@ def run(screenshot=None):
 
         page = browser.new_page()
         errors = []
+        # The console follows the browser language; pin Chinese so that the
+        # assertions below name the Chinese text.
+        page.add_init_script("try { localStorage.setItem('npt-lang', 'zh-CN'); } catch (error) {}")
         page.on("pageerror", lambda error: errors.append(str(error)))
         pending_config = []
         def hold_config(route):

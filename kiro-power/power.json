@@ -1,0 +1,46 @@
+{
+  "name": "net-proxy-tool",
+  "version": "1.5.0",
+  "description": "The checks and commands that net-proxy-tool needs while an agent works on it.",
+  "readOnly": true,
+  "requires": {
+    "python": ">=3.8"
+  },
+  "commands": [
+    {
+      "name": "session brief",
+      "command": "python -X utf8 tools/kiro/session_brief.py",
+      "description": "The branch, the uncommitted work, the version agreement and the standing rules."
+    },
+    {
+      "name": "standard library check",
+      "command": "python -X utf8 tools/kiro/check_stdlib.py --all",
+      "description": "Reports any runtime import outside the standard library."
+    },
+    {
+      "name": "secret scan",
+      "command": "python -X utf8 tools/kiro/scan_secrets.py --staged",
+      "description": "Reports a credential or a private identifier in the staged change."
+    },
+    {
+      "name": "release consistency",
+      "command": "python -X utf8 tools/kiro/check_release_consistency.py",
+      "description": "Reports every version placeholder that does not agree."
+    },
+    {
+      "name": "related tests",
+      "command": "python -X utf8 tools/kiro/run_related_tests.py --changed",
+      "description": "Runs the test modules that belong to the files that changed."
+    },
+    {
+      "name": "demo",
+      "command": "python -X utf8 tools/demo.py",
+      "description": "Runs the whole flow through the local observation gateway."
+    }
+  ],
+  "rules": [
+    "The power never writes the configuration and never switches a node.",
+    "A push, a release, a deployment and a change of a remote node need the maintainer's approval.",
+    "The commands that could print a remote URL, a token or the console configuration are blocked by the hooks."
+  ]
+}

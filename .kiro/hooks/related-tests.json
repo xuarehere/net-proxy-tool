@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Related tests",
+      "trigger": "Stop",
+      "description": "When an agent turn ends, runs the test modules related to Python files changed since HEAD, with a temporary NET_PROXY_CONFIG; skips when nothing changed since the last run (spec: dev-guardrails).",
+      "action": {
+        "type": "command",
+        "command": "python -X utf8 tools/kiro/run_related_tests.py --changed",
+        "timeout": 150
+      }
+    }
+  ]
+}

@@ -42,8 +42,11 @@ class TestWebConsole(unittest.TestCase):
                 data.setdefault('node_revision', node.get('node_revision', 0))
         conn = http.client.HTTPConnection(*self.web.server_address, timeout=6)
         try:
+            request_headers = dict(headers or {})
+            if data is not None:
+                request_headers.setdefault("Content-Type", "application/json")
             conn.request("GET" if data is None else "POST", path,
-                         None if data is None else json.dumps(data), headers or {})
+                         None if data is None else json.dumps(data), request_headers)
             response = conn.getresponse()
             body = response.read()
             if response.headers.get_content_type() == "application/json":

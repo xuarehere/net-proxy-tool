@@ -139,5 +139,70 @@ class LauncherTests(IsolatedTest):
                 thread.join()
 
 
+class DockerContextTests(unittest.TestCase):
+    def test_dockerignore_includes_every_runtime_file_copied_by_dockerfile(self):
+        rules = {
+            line.strip()
+            for line in (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        }
+        required = {
+            "sdk/__init__.py",
+            "sdk/config.py",
+            "sdk/proxy_session.py",
+            "web/__init__.py",
+            "web/server.py",
+            "web/ssh_askpass.py",
+            "web/node_baseline.py",
+            "web/node_probe.py",
+            "web/diagnostics.py",
+            "web/local_gateway.py",
+            "web/messages.py",
+            "web/session_switch.sh",
+            "web/container_helpers.sh",
+            "web/provision.sh",
+            "web/static/index.html",
+            "web/static/app.js",
+            "web/static/i18n.js",
+            "web/static/style.css",
+        }
+        missing = sorted(path for path in required if "!" + path not in rules)
+        self.assertEqual(missing, [])
+
+    def test_compose_smoke_passes_port_and_token_to_console_api(self):
+        sys.path.insert(0, str(ROOT / "packaging"))
+        try:
+            import test_compose
+        finally:
+            sys.path.pop(0)
+        calls = []
+
+        def fake_api(port, path, payload=None, token=None):
+            calls.append((port, path, payload, token))
+            if path == "/api/config":
+                if len([c for c in calls if c[1] == "/api/config"]) == 1:
+                    return {"gateways": [], "clients": []}
+                return {
+                    "gateways": [{"id": "gw-1"}],
+                    "clients": [{"id": "test-ssh", "node_revision": 0, "bound_gateway_id": "gw-1"}],
+                }
+            if path == "/api/test-node-preflight":
+                return {"auth_ok": True}
+            return {"success": True}
+
+        def fake_run(args, **kwargs):
+            stdout = b"ready"
+            if args[:2] == ["docker", "exec"] and "/home/tester/.curlrc" in args:
+                idx = len([c for c in calls if c[1] == "/api/node-switch"])
+                stdout = b"fixture-ssh:7890" if idx == 1 else b"silent"
+            return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr=b"")
+
+        with patch.object(test_compose, "console_api", side_effect=fake_api), \
+             patch.object(test_compose.subprocess, "run", side_effect=fake_run):
+            test_compose.main()
+        self.assertTrue(calls)
+        self.assertTrue(all(isinstance(port, int) and token == test_compose.ACCESS_TOKEN for port, _, _, token in calls))
+
+
 if __name__ == "__main__":
     unittest.main()

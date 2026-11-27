@@ -29,7 +29,7 @@ def main():
     name = f"net-proxy-tool-{args.platform}.{ext}"
     pattern = rf"https://github\.com/[^/()\s]+/[^/()\s]+/releases/download/{re.escape(args.tag)}/{re.escape(name)}"
     links = []
-    for doc in ["README.md", "README_EN.md"]:
+    for doc in ["README.md", "README.zh-CN.md"]:
         match = re.search(pattern, (root / doc).read_text(encoding="utf-8"))
         if not match:
             raise ValueError(f"{doc}: missing {args.tag} link for {name}")

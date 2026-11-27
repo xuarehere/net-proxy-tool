@@ -1,0 +1,5 @@
+# Test-only tools. The runtime uses the Python standard library only.
+# Property-based tests (test/test_prop_*.py) are skipped when Hypothesis is missing.
+hypothesis==6.170.17; python_version >= "3.11"
+# Browser checks in packaging/test_browser_*.py; also run `python -m playwright install chromium`.
+playwright==1.57.0; python_version >= "3.9"

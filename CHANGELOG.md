@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.0] - 2026-11-26
+
+### Added
+
+- A local observation gateway ships with the tool. It listens on the loopback interface only, reaches ports 80 and 443, holds at most 64 tunnels and remembers the last 200 connections. The first-run screen offers two ways to use it: save it as a gateway, or start it and send one request at the same time.
+- An MCP server, `net-proxy-tool-mcp`, answers the console's diagnostics for a coding agent: list the gateways, test one, check the configured sites, list the nodes and run one command through the proxy. It never writes the configuration and never switches a node.
+- `run_with_proxy` starts one program without a shell, keeps the proxy variables inside the child process only, bounds the time and the output, and stops the whole process tree on a cancellation or a timeout. With `inspect` it routes the command through the observation gateway and reports the hosts the command reached.
+- The console reports its own addresses, so that a gateway address reachable by a remote node can be chosen.
+- The development workflow is part of the repository: one specification directory per feature, the standing rules in `.kiro/steering/`, the event hooks in `.kiro/hooks/` and the property-based tests that each specification names. `AGENTS.md` holds the operating rules for any agent that works on the code. See [the Kiro and agent guide](docs/kiro_en.md).
+- A Kiro power with the checks an agent needs here, and a read-only custom agent for the question why a request does not leave through the proxy.
+
+### Security
+
+- The console validates every API request before it reaches a handler: typed fields, bounded sizes, one JSON media type and one body length. A malformed request is answered with a clear error instead of an internal failure.
+- An unexpected error answers with an error identifier only. The details stay in the console log, where they can be matched to the identifier.
+- A console that listens beyond the loopback interface requires an access token from remote clients. The token never appears in an API answer, an audit record or the request log.
+- The audit log records an ISO timestamp and the client address.
+- A remote node can no longer be bound to the local observation gateway, and the console asks before it enables a remote node on a loopback gateway.
+
+### Changed
+
+- The container console publishes an access link in its startup log. Open it once to receive the access cookie, or set `NET_PROXY_ACCESS_TOKEN` before starting Compose.
+- The audit log rotates at 5 MiB and keeps three generations; the console log rotates at 10 MiB.
+- The console warns at startup when the configuration file is readable by other accounts.
+- A configuration save that fails because another program holds the file is retried instead of reported.
+- `README.md` is English and `README.zh-CN.md` is Chinese. The runtime is checked on Python 3.8 and 3.13 as well as on the packaged platforms.
+
+### Fixed
+
+- The recorded node account name no longer carries a trailing newline byte, so the console no longer believes that an unchanged account changed.
+- Two nodes tested at the same time keep their own result instead of overwriting each other.
+- The action menu of a node opens complete, instead of being cut off by the table.
+- The dim text of the console reaches a readable contrast against the card background.
+
 ## [1.4.3]
 
 - The gateway wizard reports the final HTTPS outcome separately from TCP, proxy CONNECT and redirects. A TLS timeout after a redirect shows the failing host and leaves the final HTTP status empty.

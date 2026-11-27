@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "net-proxy-tool"
-version = "1.4.3"
+version = "1.5.0"
 description = "Universal cross-platform proxy orchestrator and Docker container network isolation suite"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -45,10 +45,11 @@ Issues = "https://github.com/xuarehere/net-proxy-tool/issues"
 [project.scripts]
 with-proxy = "with_proxy:main"
 net-proxy-tool = "launcher:main"
+net-proxy-tool-mcp = "net_proxy_mcp:main"
 
 [tool.setuptools]
 packages = ["sdk", "web"]
-py-modules = ["with_proxy", "launcher"]
+py-modules = ["with_proxy", "launcher", "net_proxy_mcp"]
 
 [tool.setuptools.package-data]
 web = ["static/*", "*.sh"]

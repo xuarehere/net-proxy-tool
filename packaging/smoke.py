@@ -26,11 +26,14 @@ class RecordingProxy(BaseHTTPRequestHandler):
         pass
 
 
-def api(port, path, payload=None):
+def api(port, path, payload=None, token=None):
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=90)
     try:
         data = json.dumps(payload).encode() if payload is not None else None
-        conn.request("POST" if data else "GET", path, data, {"Content-Type": "application/json"})
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Cookie"] = "npt_access=" + token
+        conn.request("POST" if data else "GET", path, data, headers)
         res = conn.getresponse()
         body = res.read()
         if res.status != 200:
@@ -41,6 +44,7 @@ def api(port, path, payload=None):
 
 
 def browser_setup(port, gateway):
+    import re
     from playwright.sync_api import sync_playwright
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
@@ -58,7 +62,7 @@ def browser_setup(port, gateway):
         with page.expect_response(lambda r: "/api/test-gateway" in r.url) as tested:
             page.locator("#setup-test").click()
         assert tested.value.json()["success"]
-        page.locator("#setup-result", has_text="代理请求成功").wait_for()
+        page.locator("#setup-result", has_text=re.compile(r"代理请求成功|Proxy request succeeded")).wait_for()
         assert "HTTP 200" in page.locator("#setup-result").inner_text()
         assert not errors, errors
         browser.close()

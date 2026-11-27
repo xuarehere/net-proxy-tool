@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Documentation pair reminder",
+      "trigger": "PostFileSave",
+      "description": "When an English or Chinese document of a pair is saved, reminds the agent to update the other language in the same change (spec: dev-guardrails).",
+      "matcher": "(^|[\\\\/])(README|README_EN|README\\.zh-CN|QUICKSTART|QUICKSTART_EN)\\.md$|docs[\\\\/]operations(_en)?\\.md$",
+      "action": {
+        "type": "agent",
+        "prompt": "A document that has an English and a Chinese version was just saved. Pairs: README.md with README.zh-CN.md (before v1.5.0: README.md with README_EN.md), QUICKSTART_EN.md with QUICKSTART.md, docs/operations_en.md with docs/operations.md. Before finishing this change, make the same factual change in the other file of the pair, or state in one sentence why it does not apply. Keep commands, paths and version numbers identical in both files. Follow .kiro/steering/docs-style.md."
+      }
+    }
+  ]
+}

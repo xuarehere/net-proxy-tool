@@ -1,12 +1,12 @@
 # 第一次使用
 
-[English](QUICKSTART_EN.md) · [下载](README.md#下载并打开控制台) · [排障](docs/operations.md)
+[English](QUICKSTART_EN.md) · [下载](README.zh-CN.md#下载并打开控制台) · [排障](docs/operations.md)
 
 准备一台能运行浏览器的电脑，以及一个你有权使用的 HTTP 或混合代理。先在代理客户端记下**监听地址和端口**。本机代理通常监听 `127.0.0.1`。其他机器访问它时，需要使用那台机器可达的地址和开放的端口。
 
 ## 1. 选择下载包
 
-Windows 选 x64 ZIP。macOS 打开“关于本机”，Apple 芯片选 ARM64，Intel 选 x64。Linux 运行 `uname -m`，`x86_64` 选 x64，`aarch64` 选 ARM64。Linux 发布包使用 glibc；Alpine 用户可选择源码或容器方式。GitHub 的 **Source code** 压缩包需要另备 Python。 [下载列表](README.md#下载并打开控制台)
+Windows 选 x64 ZIP。macOS 打开“关于本机”，Apple 芯片选 ARM64，Intel 选 x64。Linux 运行 `uname -m`，`x86_64` 选 x64，`aarch64` 选 ARM64。Linux 发布包使用 glibc；Alpine 用户可选择源码或容器方式。GitHub 的 **Source code** 压缩包需要另备 Python。 [下载列表](README.zh-CN.md#下载并打开控制台)
 
 需要核对下载内容时，从同一 Release 下载 `SHA256SUMS.txt`。在下载目录运行相应命令，把结果与清单中**同名文件**的 64 位十六进制值逐字核对。命令示例使用各平台的一种架构，文件名请按实际下载包调整。
 
@@ -44,7 +44,7 @@ macOS 便携包按终端命令分发，未做 Apple Developer ID 公证。Intel 
 
 **成功标志** · 目标返回成功状态码后，第一次代理请求已完成。后续需要运行自己的任务时，可以选择控制台或复制页面上的命令。目标站点要求登录或触发限流时，请结合状态码判断原因。
 
-![首次打开后的网关设置与验证入口](docs/assets/console.png)
+![首次打开后的网关设置与验证入口](docs/assets/console.zh.png)
 
 **停止** · 关闭浏览器标签页后，服务仍会运行。在解压目录使用 `.\Start.bat --stop` 或 `./net-proxy-tool --stop`。再次启动会读取已保存的网关。
 

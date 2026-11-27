@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Verify task with full suite",
+      "trigger": "PostTaskExec",
+      "description": "After a spec task completes, runs the full unittest suite with a temporary NET_PROXY_CONFIG (spec: dev-guardrails).",
+      "action": {
+        "type": "command",
+        "command": "python -X utf8 tools/kiro/run_related_tests.py --all",
+        "timeout": 600
+      }
+    }
+  ]
+}

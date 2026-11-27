@@ -8,6 +8,9 @@ COPY sdk/ sdk/
 COPY web/ web/
 RUN mkdir -p /app/data && chown proxytool:proxytool /app/data
 USER proxytool
+# The container console listens on every interface. Set NET_PROXY_ACCESS_TOKEN to
+# choose the access token; when it is empty the console generates one and
+# prints the access link in the container log.
 ENV NET_PROXY_CONFIG=/app/data/config.json NET_PROXY_BIND=0.0.0.0 PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 EXPOSE 8899
 HEALTHCHECK --interval=10s --timeout=3s --start-period=3s \

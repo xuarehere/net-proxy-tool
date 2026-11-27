@@ -38,7 +38,7 @@ record() {
     emit "$r_key" "$r_hex|present|$(metadata "$r_path")|$r_hash"
 }
 emit uid "$(id -u)"
-emit user "$(id -un | hex)"
+emit user "$(printf '%s' "$(id -un)" | hex)"
 emit home "$(printf '%s' "$HOME" | hex)"
 emit shell "$(printf '%s' "$NPT_BASELINE_SHELL" | hex)"
 for key in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY; do

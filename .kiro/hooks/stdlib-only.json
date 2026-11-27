@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Stdlib-only runtime",
+      "trigger": "PostFileSave",
+      "description": "After a Python file or pyproject.toml is saved, reports runtime imports outside the Python standard library and any declared runtime dependency (spec: dev-guardrails).",
+      "matcher": "\\.py$|pyproject\\.toml$",
+      "action": {
+        "type": "command",
+        "command": "python -X utf8 tools/kiro/check_stdlib.py",
+        "timeout": 30
+      }
+    }
+  ]
+}

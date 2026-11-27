@@ -1,30 +1,30 @@
 {
-  "version": "1.4.2",
+  "version": "1.5.0",
   "active_gateway_id": "gw-default",
   "gateways": [
     {
       "id": "gw-default",
-      "name": "局域网代理工作站",
+      "name": "LAN Proxy Workstation",
       "host": "192.168.1.100",
       "port": 7890,
       "protocol": "http",
-      "description": "局域网科学出海网关 (Clash / Mihomo / v2ray / Xray)",
+      "description": "Shared LAN HTTP outbound gateway (Clash / Mihomo / v2ray / Xray)",
       "is_default": true
     },
     {
       "id": "gw-local-win",
-      "name": "本机开发代理端口",
+      "name": "Local Dev Proxy Port",
       "host": "127.0.0.1",
       "port": 7897,
       "protocol": "http",
-      "description": "开发者本地开发机代理端口 (Clash/Mihomo)",
+      "description": "Developer workstation loopback HTTP proxy port (Clash / Mihomo)",
       "is_default": false
     }
   ],
   "clients": [
     {
       "id": "node-linux-server",
-      "name": "Linux 计算工作站 / GPU 服务器",
+      "name": "Linux Compute Workstation / GPU Server",
       "host": "192.168.1.101",
       "port": 22,
       "os_type": "linux",
@@ -32,13 +32,13 @@
       "auth_type": "key",
       "ssh_user": "ubuntu",
       "bound_gateway_id": "gw-default",
-      "tags": ["Linux", "x86_64", "GPU计算", "深度学习"],
+      "tags": ["Linux", "x86_64", "GPU", "Deep Learning"],
       "is_proxy_enabled": false,
-      "description": "深度学习计算节点或研发工作站，无公网直接出网能力"
+      "description": "Deep learning compute node or R&D workstation without direct public internet access"
     },
     {
       "id": "node-docker-port",
-      "name": "端口映射 Docker 开发容器",
+      "name": "Port-Mapped Docker Dev Container",
       "host": "192.168.1.102",
       "port": 6600,
       "os_type": "docker",
@@ -46,13 +46,13 @@
       "auth_type": "password",
       "ssh_user": "root",
       "bound_gateway_id": "gw-default",
-      "tags": ["Docker", "6600", "沙箱隔离", "独立出海"],
+      "tags": ["Docker", "6600", "Sandbox", "Isolated Egress"],
       "is_proxy_enabled": false,
-      "description": "通过映射端口 6600 直连进入的独立 Docker 容器，使用该节点配置的 SSH 身份"
+      "description": "Isolated Docker container reached via mapped port 6600 using its configured SSH identity"
     },
     {
       "id": "node-docker-sandbox",
-      "name": "沙箱 Docker 容器 (宿主机穿透)",
+      "name": "Sandboxed Docker Container (Host Exec)",
       "host": "192.168.1.102",
       "os_type": "docker",
       "access_mode": "docker_host",
@@ -61,22 +61,22 @@
       "ssh_user": "ubuntu",
       "bound_gateway_id": "gw-default",
       "is_proxy_enabled": false,
-      "tags": ["Docker", "无特权容器", "精准注入"],
-      "description": "未暴露 SSH 端口的轻量微服务容器，通过宿主机 docker exec 穿透下发配置"
+      "tags": ["Docker", "Unprivileged", "Scoped Injection"],
+      "description": "Lightweight microservice container without an exposed SSH port, configured via host docker exec"
     },
     {
       "id": "node-local-dev",
-      "name": "开发者本机 (Windows / macOS / Linux)",
+      "name": "Developer Workstation (Windows / macOS / Linux)",
       "host": "127.0.0.1",
       "os_type": "windows",
       "bound_gateway_id": "gw-default",
-      "tags": ["开发机", "本地沙箱"],
+      "tags": ["Workstation", "Local Sandbox"],
       "is_proxy_enabled": false,
-      "description": "日常本地研发、单任务 CLI 与 SDK 联调环境"
+      "description": "Local development, single-command CLI, and Python ProxySession integration environment"
     },
     {
       "id": "node-edge-ai",
-      "name": "工业工控机 / 边缘 AI 节点",
+      "name": "Industrial Controller / Edge AI Node",
       "host": "192.168.1.103",
       "port": 22,
       "os_type": "linux",
@@ -84,63 +84,63 @@
       "auth_type": "key",
       "ssh_user": "root",
       "bound_gateway_id": "gw-default",
-      "tags": ["边缘计算", "ARM64", "Jetson", "工控机"],
+      "tags": ["Edge AI", "ARM64", "Jetson", "Industrial"],
       "is_proxy_enabled": false,
-      "description": "产线或现场边缘推理设备，纯内网受控出海维护"
+      "description": "Factory or field edge inference node on a private intranet with scoped outbound control"
     }
   ],
   "web_port": 8899,
-  "no_proxy": "localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,*.local",
+  "no_proxy": "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,*.local",
   "diagnostic_targets": {
     "Google": {
       "url": "https://www.google.com/",
-      "desc": "全球互联网基础连通",
-      "category": "基础服务"
+      "desc": "Global web connectivity baseline",
+      "category": "Core"
     },
     "Claude": {
       "url": "https://claude.ai/",
-      "desc": "Claude 网页入口",
-      "category": "AI/大模型"
+      "desc": "Claude web portal",
+      "category": "AI / LLM"
     },
     "ChatGPT": {
       "url": "https://chatgpt.com/",
-      "desc": "ChatGPT 网页入口",
-      "category": "AI/大模型"
+      "desc": "ChatGPT web portal",
+      "category": "AI / LLM"
     },
     "YouTube": {
       "url": "https://www.youtube.com/",
-      "desc": "高吞吐流媒体/视音频数据",
-      "category": "多媒体"
+      "desc": "High-throughput media streaming",
+      "category": "Media"
     },
     "Gemini": {
       "url": "https://gemini.google.com/",
-      "desc": "Gemini 网页入口",
-      "category": "AI/大模型"
+      "desc": "Gemini web portal",
+      "category": "AI / LLM"
     },
     "GitHub": {
       "url": "https://github.com",
-      "desc": "源码拉取与托管",
-      "category": "研发必备"
+      "desc": "Source control and releases",
+      "category": "Developer"
     },
     "Raw GitHub": {
       "url": "https://raw.githubusercontent.com",
-      "desc": "脚本与发行包直连",
-      "category": "研发必备"
+      "desc": "Direct script and artifact fetches",
+      "category": "Developer"
     },
     "HuggingFace": {
       "url": "https://huggingface.co",
-      "desc": "开源 AI 模型权重下载",
-      "category": "AI/大模型"
+      "desc": "Open AI model weights and datasets",
+      "category": "AI / LLM"
     },
     "PyPI": {
       "url": "https://pypi.org",
-      "desc": "Python 官方包索引与依赖",
-      "category": "包管理"
+      "desc": "Official Python package index",
+      "category": "Packaging"
     },
     "OpenAI API": {
       "url": "https://api.openai.com",
-      "desc": "大语言模型 API 接口",
-      "category": "AI/大模型"
+      "desc": "LLM API endpoint",
+      "category": "AI / LLM"
     }
   }
 }

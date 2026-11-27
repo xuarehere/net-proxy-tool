@@ -153,6 +153,14 @@ class ProxyDiagnosticsTests(unittest.TestCase):
         self.assertTrue(result["budget_expired"])
         self.assertFalse(result["http_ok"] or result["response_received"])
 
+    def test_a_peer_eof_is_retried_whatever_the_python_reports(self):
+        # Python 3.8 raises SSLZeroReturnError and newer versions SSLEOFError.
+        for error in (ssl.SSLEOFError("EOF"), ssl.SSLZeroReturnError("EOF")):
+            with self.subTest(error=type(error).__name__):
+                result, _ = self.tls_fixture([error, None], first_handshake_seconds=0)
+                self.assertEqual(result["tls_retries"], 1)
+                self.assertEqual(result["attempts"][0]["tls"], "eof")
+
     def tls_fixture(self, outcomes, suffix="final", first_handshake_seconds=5):
         """Keep CONNECT/GET real and inject only the TLS handshake outcome."""
         self.proxy.RequestHandlerClass = HandshakeProxy
@@ -280,7 +288,8 @@ class GatewayIdentityTests(unittest.TestCase):
                 def add(payload):
                     conn = http.client.HTTPConnection(*web.server_address, timeout=3)
                     try:
-                        conn.request("POST", "/api/gateways/add", json.dumps(payload))
+                        conn.request("POST", "/api/gateways/add", json.dumps(payload),
+                                     {"Content-Type": "application/json"})
                         response = conn.getresponse()
                         return response.status, json.loads(response.read())
                     finally:

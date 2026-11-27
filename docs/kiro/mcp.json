@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "net-proxy-tool": {
+      "command": "python",
+      "args": ["-X", "utf8", "net_proxy_mcp.py"],
+      "autoApprove": ["list_gateways", "check_gateway", "check_gateway_targets", "list_nodes"]
+    }
+  }
+}

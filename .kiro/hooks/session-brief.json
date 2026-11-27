@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Session brief",
+      "trigger": "SessionStart",
+      "description": "At session start, adds the branch, uncommitted work, version consistency and the standing project rules to the agent's context. Never prints URLs or configuration (spec: dev-guardrails).",
+      "action": {
+        "type": "command",
+        "command": "python -X utf8 tools/kiro/session_brief.py",
+        "timeout": 30
+      }
+    }
+  ]
+}
