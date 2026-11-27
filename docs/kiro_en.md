@@ -4,7 +4,7 @@ This project is developed with an AI coding agent, and the agent's workflow is p
 repository rather than a private habit. The pages below explain what lives where, so that a
 reviewer can follow the work and a contributor can continue it.
 
-[简体中文](kiro.md) · [Quick start](QUICKSTART_EN.md) · [Operations](docs/operations_en.md)
+[简体中文](kiro.md) · [Quick start](../QUICKSTART_EN.md) · [Operations](operations_en.md)
 
 ## What the repository holds
 
@@ -13,7 +13,9 @@ reviewer can follow the work and a contributor can continue it.
 | `.kiro/specs/<feature>/` | The requirements, the design and the task list of one feature |
 | `.kiro/steering/` | The standing rules that apply to every change |
 | `.kiro/hooks/` | The event hooks that guard and check the work |
-| `tools/kiro/` | The scripts the hooks and the release procedure run |
+| `.kiro/agents/` | The custom agent for egress questions |
+| `kiro-power/` | The power: the checks and commands an agent needs here |
+| `tools/kiro/` | The scripts the hooks, the power and the release procedure run |
 | `test/test_prop_*.py` | The property-based tests that each specification names |
 | `docs/kiro/mcp.json` | The MCP server registration for the agent |
 
@@ -84,6 +86,16 @@ hosts the command reached.
 
 Register it with the agent by copying `docs/kiro/mcp.json` into the agent's own settings
 directory; the repository does not carry that file, because the location belongs to the machine.
+
+## The power and the agent
+
+`kiro-power/` holds the commands an agent needs here: the session brief, the standard library
+check, the secret scan, the release consistency check, the related tests and the demo. All of them
+are read-only.
+
+`.kiro/agents/egress-diagnostician.md` is the custom agent for the question the power answers:
+why does a request not leave through the proxy. It names the stage where the request stops and
+says what it did not verify.
 
 ## The checks
 

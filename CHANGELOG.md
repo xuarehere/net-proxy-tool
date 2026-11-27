@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `run_with_proxy` starts one program without a shell, keeps the proxy variables inside the child process only, bounds the time and the output, and stops the whole process tree on a cancellation or a timeout. With `inspect` it routes the command through the observation gateway and reports the hosts the command reached.
 - The console reports its own addresses, so that a gateway address reachable by a remote node can be chosen.
 - The development workflow is part of the repository: one specification directory per feature, the standing rules in `.kiro/steering/`, the event hooks in `.kiro/hooks/` and the property-based tests that each specification names. See [the Kiro and agent guide](docs/kiro_en.md).
+- A Kiro power with the checks an agent needs here, and a read-only custom agent for the question why a request does not leave through the proxy.
 
 ### Security
 
