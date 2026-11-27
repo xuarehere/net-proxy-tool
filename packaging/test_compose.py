@@ -23,8 +23,8 @@ def main():
         port = sock.getsockname()[1]
     env = dict(os.environ, NET_PROXY_HOST_PORT=str(port), NET_PROXY_ACCESS_TOKEN=ACCESS_TOKEN)
 
-    def api(path, payload=None):
-        return console_api(port, path, payload, token=ACCESS_TOKEN)
+    def api(target_port, path, payload=None):
+        return console_api(target_port, path, payload, token=ACCESS_TOKEN)
 
     def run(args, stdin=None, check=True):
         proc = subprocess.run(args, cwd=ROOT, env=env, input=stdin, stdout=subprocess.PIPE,
