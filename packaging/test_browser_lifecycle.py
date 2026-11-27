@@ -31,6 +31,8 @@ def run():
         stack.callback(browser.close)
         page = browser.new_page(viewport={'width': 1280, 'height': 900})
         errors, dialogs, mutations = [], [], []
+        # The console follows the browser language; pin Chinese for the assertions.
+        page.add_init_script("try { localStorage.setItem('npt-lang', 'zh-CN'); } catch (error) {}")
         page.on('pageerror', lambda error: errors.append(str(error)))
         page.on('dialog', lambda dialog: (dialogs.append(dialog.message), dialog.accept()))
         page.goto('http://127.0.0.1:' + str(console.server_port))

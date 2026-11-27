@@ -76,6 +76,8 @@ def run():
         stack.callback(browser.close)
         page = browser.new_page()
         errors = []
+        # The console follows the browser language; pin Chinese for the assertions.
+        page.add_init_script("try { localStorage.setItem('npt-lang', 'zh-CN'); } catch (error) {}")
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(url)
         page.locator('[data-tab="tab-topology"]').click()

@@ -42,6 +42,7 @@ from sdk.config import (DEFAULT_TEST_URL, VERSION, config_permission_warning, da
 from web import node_probe
 from web import node_baseline
 from web import diagnostics
+from web import messages
 from web.local_gateway import LocalGateway
 from web.ssh_askpass import password_environment
 
@@ -191,6 +192,21 @@ class ThreadingHTTPServer(HTTPServer):
         # even when binding loopback. The console only needs the numeric address.
         TCPServer.server_bind(self)
         self.server_name, self.server_port = self.server_address[:2]
+
+
+def localize_messages(value, language):
+    """Localize the `error` and `message` fields of an API answer."""
+    if isinstance(value, dict):
+        result = {}
+        for key, child in value.items():
+            if key in ("error", "message") and isinstance(child, str):
+                result[key] = messages.localize(child, language)
+            else:
+                result[key] = localize_messages(child, language)
+        return result
+    if isinstance(value, list):
+        return [localize_messages(item, language) for item in value]
+    return value
 
 
 def audit_path():
@@ -1303,12 +1319,20 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def send_json(self, data, status_code=200):
-        payload = json.dumps(public_data(data), ensure_ascii=False).encode("utf-8")
+        payload = json.dumps(public_data(localize_messages(data, self.request_language())),
+                             ensure_ascii=False).encode("utf-8")
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
+
+    def request_language(self):
+        """The language the browser asked for in its last request."""
+        try:
+            return messages.normalize_language(self.headers.get("X-NPT-Language", ""))
+        except Exception:
+            return messages.DEFAULT_LANGUAGE
 
     def send_text(self, text, content_type="text/plain; charset=utf-8", status_code=200):
         payload = text.encode("utf-8")
@@ -1465,6 +1489,16 @@ class ProxyConsoleHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/local-gateway":
             self.send_json(local_gateway_state())
+            return
+
+        if path == "/api/i18n.js":
+            script = messages.catalogue_script().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Content-Length", str(len(script)))
+            self.end_headers()
+            self.wfile.write(script)
             return
 
         if path == "/api/status":

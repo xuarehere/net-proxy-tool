@@ -51,6 +51,7 @@ jobs:
           python -X utf8 packaging/test_browser_lifecycle.py
           python -X utf8 packaging/test_browser_nodes.py
           python -X utf8 packaging/test_browser_local_gateway.py
+          python -X utf8 packaging/test_browser_i18n.py
       - name: Launch from a clean archive and configure a real local test proxy
         run: |
           mkdir -p "build/中文 Portable"
