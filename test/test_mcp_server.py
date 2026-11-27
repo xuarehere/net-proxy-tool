@@ -3,6 +3,8 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -220,6 +222,19 @@ class McpServerTests(unittest.TestCase):
         answers, _ = self.serve([
             self.request(1, "tools/call", {"name": "check_gateway", "arguments": {"address": "no-port"}})])
         self.assertEqual(answers[0]["error"]["code"], -32602)
+
+    def test_main_writes_protocol_replies_to_real_stdout(self):
+        payload = "\n".join([
+            json.dumps(self.request(1, "initialize", CURRENT_META)),
+            json.dumps(self.request(2, "tools/list", {})),
+        ]) + "\n"
+        completed = subprocess.run(
+            [sys.executable, "-X", "utf8", str(ROOT / "net_proxy_mcp.py"), "--config", str(self.config)],
+            input=payload, text=True, capture_output=True, timeout=15, check=True,
+        )
+        replies = [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
+        self.assertEqual([item["id"] for item in replies], [1, 2])
+        self.assertEqual(completed.stderr.strip(), "")
 
 
 if __name__ == "__main__":

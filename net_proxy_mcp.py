@@ -662,8 +662,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Serve net-proxy-tool diagnostics over MCP.")
     parser.add_argument("--config", help="path to the console configuration file")
     args = parser.parse_args(argv)
+    protocol_stdout = sys.stdout
     redirect_stdout_to_stderr()
-    server = McpServer(registry=ToolRegistry(args.config))
+    server = McpServer(registry=ToolRegistry(args.config), stdout=protocol_stdout)
     try:
         server.run()
     except KeyboardInterrupt:
