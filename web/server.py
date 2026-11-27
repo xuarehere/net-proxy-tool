@@ -578,7 +578,9 @@ def check_http_target(name: str, target_info, proxy_url: str, timeout: float = 1
                         conn.sock.settimeout(remaining_time())
                         conn.sock = context.wrap_socket(conn.sock, server_hostname=target.hostname)
                         attempt["tls"] = "passed"
-                    except ssl.SSLEOFError as exc:
+                    except (ssl.SSLEOFError, ssl.SSLZeroReturnError) as exc:
+                        # The peer closed the TLS connection. Python 3.8 reports it as
+                        # SSLZeroReturnError and newer versions as SSLEOFError.
                         attempt["tls"] = "eof"
                         attempt["elapsed_ms"] = round((time.monotonic() - attempt_started) * 1000, 1)
                         conn.close()
