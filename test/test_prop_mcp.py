@@ -11,7 +11,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from prop_support import given, st
+from prop_support import example, given, st
 
 import net_proxy_mcp
 from net_proxy_mcp import McpServer, ToolRegistry
@@ -74,6 +74,12 @@ class McpProtocolProperties(unittest.TestCase):
         else:
             os.environ["NET_PROXY_CONFIG"] = self.previous
 
+    @example(messages=[
+        {"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {"_meta": dict(CURRENT_META)}},
+        {"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {"_meta": dict(CURRENT_META)}},
+        {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 1}},
+        {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 1}},
+    ])
     @given(messages=message_sequence())
     def test_p8_every_request_is_answered_once_and_notifications_are_not(self, messages):
         collector = Collector()
@@ -94,6 +100,38 @@ class McpProtocolProperties(unittest.TestCase):
         expected = sorted(message["id"] for message in messages if "id" in message)
         answered = sorted(json.loads(line)["id"] for line in collector.lines if line.strip())
         self.assertEqual(answered, expected)
+
+    def test_duplicate_cancel_notifications_do_not_double_answer_queued_requests(self):
+        import threading
+
+        started = threading.Event()
+        release = threading.Event()
+
+        class BlockingRegistry(ToolRegistry):
+            def list_gateways(self, arguments, cancel_check=None):
+                started.set()
+                release.wait(timeout=5)
+                return {"ok": True}
+
+        collector = Collector()
+        server = McpServer(registry=BlockingRegistry(), stdin=io.StringIO(), stdout=collector, workers=1)
+        server.handle_line(json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "list_gateways", "arguments": {}},
+        }))
+        self.assertTrue(started.wait(timeout=2))
+        server.handle_line(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}}))
+        server.handle_line(json.dumps({
+            "jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 1},
+        }))
+        server.handle_line(json.dumps({
+            "jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 1},
+        }))
+        release.set()
+        server.executor.shutdown(wait=True)
+
+        answered = [json.loads(line)["id"] for line in collector.lines if line.strip()]
+        self.assertEqual(answered, [1, 1])
 
 
 if __name__ == "__main__":

@@ -452,6 +452,7 @@ class McpServer:
         self.stdin = stdin if stdin is not None else sys.stdin
         self.protocol_stream = stdout if stdout is not None else sys.stdout
         self.write_lock = threading.Lock()
+        self.futures_lock = threading.Lock()
         self.executor = ThreadPoolExecutor(max_workers=workers)
         self.futures = {}
         self.cancelled = set()
@@ -503,7 +504,18 @@ class McpServer:
             return
         request_id = message.get("id")
         future = self.executor.submit(self.answer, request_id, method, params)
-        self.futures[request_id] = future
+        with self.futures_lock:
+            self.futures.setdefault(request_id, []).append(future)
+        future.add_done_callback(lambda done, rid=request_id: self._forget_future(rid, done))
+
+    def _forget_future(self, request_id, future):
+        with self.futures_lock:
+            entries = self.futures.get(request_id)
+            if not entries:
+                return
+            entries[:] = [item for item in entries if item is not future]
+            if not entries:
+                self.futures.pop(request_id, None)
 
     def handle_notification(self, method, params):
         if method == "notifications/cancelled":
@@ -511,11 +523,13 @@ class McpServer:
             if request_id is None:
                 request_id = params.get("id")
             self.cancelled.add(request_id)
-            future = self.futures.get(request_id)
-            # A request that has not started is cancelled here, and its answer is
-            # sent here too: a cancelled request still receives exactly one answer.
-            if future is not None and future.cancel():
-                self.send_error(request_id, REQUEST_CANCELLED, "Request cancelled")
+            with self.futures_lock:
+                pending = self.futures.pop(request_id, [])
+            # A request that has not started is popped and cancelled at most once,
+            # so repeated cancel notifications never emit duplicate answers.
+            for future in pending:
+                if future.cancel():
+                    self.send_error(request_id, REQUEST_CANCELLED, "Request cancelled")
             return
         # Every other notification is accepted and answered with nothing.
 
