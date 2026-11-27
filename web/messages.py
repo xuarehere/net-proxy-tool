@@ -153,6 +153,14 @@ MESSAGES = {
         "en": 'Docker host IP *:',
         "zh-CN": '宿主机 IP 地址 *:',
     },
+    'form-client-container-ph': {
+        "en": 'e.g. app-container',
+        "zh-CN": '例如: app-container',
+    },
+    'form-client-desc-ph': {
+        "en": 'e.g. training node or test machine',
+        "zh-CN": '例如: 深度学习训练集群或研发测试机',
+    },
     'form-client-gw-label': {
         "en": 'Operations and delivery channel *:',
         "zh-CN": '节点运维与下发通道 *:',
@@ -160,6 +168,10 @@ MESSAGES = {
     'form-client-host-label': {
         "en": 'SSH port *:',
         "zh-CN": 'SSH 端口 *:',
+    },
+    'form-client-host-ph': {
+        "en": 'e.g. 192.168.1.101 or 10.0.0.12',
+        "zh-CN": '例如: 192.168.1.101 或 10.0.0.12',
     },
     'form-client-host-port-label': {
         "en": 'Docker host user (key authentication) *:',
@@ -169,6 +181,10 @@ MESSAGES = {
         "en": 'Operating system:',
         "zh-CN": '操作系统架构:',
     },
+    'form-client-id-ph': {
+        "en": 'e.g. node-worker-202',
+        "zh-CN": '例如: node-worker-202',
+    },
     'form-client-mode-label': {
         "en": 'Worker node name *:',
         "zh-CN": '业务节点名称 *:',
@@ -176,6 +192,10 @@ MESSAGES = {
     'form-client-name-label': {
         "en": 'Node identifier (ID, generated when left empty):',
         "zh-CN": '节点唯一标识 (ID, 留空自动生成):',
+    },
+    'form-client-name-ph': {
+        "en": 'e.g. dev-workstation / test-container',
+        "zh-CN": '例如: 开发工作站 / 测试容器',
     },
     'form-client-os-label': {
         "en": 'Default outbound gateway:',
@@ -201,37 +221,73 @@ MESSAGES = {
         "en": 'SSH user *:',
         "zh-CN": 'SSH 登录用户名 *:',
     },
+    'form-client-port-ph': {
+        "en": '22 for SSH, or mapped port e.g. 6600',
+        "zh-CN": '工作站22, 容器填映射端口如6600',
+    },
     'form-client-ssh-host-label': {
         "en": 'Docker host SSH port',
         "zh-CN": '宿主机 SSH 端口',
+    },
+    'form-client-ssh-host-ph': {
+        "en": 'e.g. 192.168.1.102',
+        "zh-CN": '例如: 192.168.1.102',
     },
     'form-client-ssh-pass-input-tip-sub': {
         "en": 'Windows, Linux and macOS all support SSH keys and passwords against a verified host key. The password belongs only to the address, port and account given here; a change of identity needs it again, and no public key is registered for you. Leaving the password empty while editing keeps the password saved for that identity.',
         "zh-CN": 'Windows、Linux 与 macOS 均支持已核验主机密钥的 SSH 密钥或密码登录。密码只用于此处明确的地址、端口与账号；修改身份时需重新输入，不会自动注册公钥。编辑时密码留空表示沿用原身份已保存的密码。',
     },
+    'form-client-ssh-pass-ph': {
+        "en": 'Enter remote account password',
+        "zh-CN": '输入远程账号密码',
+    },
     'form-client-ssh-user-host-label': {
         "en": 'Tags (comma separated):',
         "zh-CN": '业务标签 (逗号分隔):',
+    },
+    'form-client-ssh-user-host-ph': {
+        "en": 'e.g. ubuntu',
+        "zh-CN": '例如: ubuntu',
     },
     'form-client-ssh-user-label': {
         "en": 'SSH authentication:',
         "zh-CN": 'SSH 认证方式:',
     },
+    'form-client-ssh-user-ph': {
+        "en": 'e.g. ubuntu, root, developer',
+        "zh-CN": '例如: ubuntu, root, developer',
+    },
     'form-client-tags-label': {
         "en": 'Description:',
         "zh-CN": '节点描述备注:',
+    },
+    'form-client-tags-ph': {
+        "en": 'e.g. Linux, GPU, Docker, Edge AI',
+        "zh-CN": '例如: Linux, GPU, 深度学习, Docker, 边缘AI',
     },
     'form-group-client-pass-label': {
         "en": 'SSH password',
         "zh-CN": 'SSH 登录密码',
     },
+    'form-gw-desc-ph': {
+        "en": 'e.g. LAN HTTP gateway host',
+        "zh-CN": '例如: Ubuntu 3090 局域网出海网关',
+    },
     'form-gw-host-label': {
         "en": 'Port *:',
         "zh-CN": '端口 *:',
     },
+    'form-gw-host-ph': {
+        "en": 'e.g. 192.168.1.100',
+        "zh-CN": '例如: 192.168.1.100',
+    },
     'form-gw-id-label': {
         "en": 'Gateway name *:',
         "zh-CN": '网关名称 *:',
+    },
+    'form-gw-id-ph': {
+        "en": 'e.g. gw-office-01',
+        "zh-CN": '例如: gw-office-01',
     },
     'form-gw-mode-label': {
         "en": 'Gateway identifier (ID, generated when left empty):',
@@ -240,6 +296,10 @@ MESSAGES = {
     'form-gw-name-label': {
         "en": 'Server IP or name *:',
         "zh-CN": '服务器 IP / 域名 *:',
+    },
+    'form-gw-name-ph': {
+        "en": 'e.g. Office HTTP gateway',
+        "zh-CN": '例如: 研发中心出海网关',
     },
     'form-gw-port-label': {
         "en": 'Protocol:',
@@ -260,6 +320,10 @@ MESSAGES = {
     'formatPeer': {
         "en": 'not obtained',
         "zh-CN": '未取得',
+    },
+    'gateway-quick-target-aria': {
+        "en": 'Gateway quick target',
+        "zh-CN": '网关池快捷目标',
     },
     'gateway-target-label': {
         "en": 'Gateway probe target',
@@ -465,6 +529,14 @@ MESSAGES = {
         "en": 'Tested: {onlineCount}/{length} target requests succeeded',
         "zh-CN": '已测试，{onlineCount}/{length} 个目标请求成功',
     },
+    'initTargetGridPlaceholder-waiting': {
+        "en": 'Waiting to test',
+        "zh-CN": '等待测试',
+    },
+    'lang-toggle-title': {
+        "en": 'Switch the interface language',
+        "zh-CN": '切换界面语言',
+    },
     'loadAuditLogs': {
         "en": '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:18px;">Reading the audit trail…</td></tr>',
         "zh-CN": '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:18px;">正在读取审计流水...</td></tr>',
@@ -561,17 +633,53 @@ MESSAGES = {
         "en": 'Details',
         "zh-CN": '事件详情 / 提示',
     },
+    'modal-client-save-label': {
+        "en": 'Save node',
+        "zh-CN": '保存节点',
+    },
+    'modal-client-test-label': {
+        "en": 'Check host reachability',
+        "zh-CN": '预检主机连通性',
+    },
     'modal-client-title': {
         "en": '➕ Register a worker node',
         "zh-CN": '➕ 登记新业务节点',
+    },
+    'modal-gw-save-label': {
+        "en": 'Save gateway',
+        "zh-CN": '保存网关',
+    },
+    'modal-gw-test-label': {
+        "en": 'Test proxy request',
+        "zh-CN": '测试代理请求',
     },
     'modal-gw-title': {
         "en": '➕ Add a proxy gateway',
         "zh-CN": '➕ 添加新代理网关',
     },
+    'modal-quick-target-aria': {
+        "en": 'Gateway modal quick target',
+        "zh-CN": '网关弹窗快捷目标',
+    },
     'modal-target-label': {
         "en": 'Request target address',
         "zh-CN": '请求目标地址',
+    },
+    'nav-handbook': {
+        "en": 'Handbook',
+        "zh-CN": '开发者手册',
+    },
+    'nav-sandbox': {
+        "en": 'Proxy Requests',
+        "zh-CN": '业务请求',
+    },
+    'nav-topology': {
+        "en": 'Topology & Nodes',
+        "zh-CN": '拓扑与节点管理',
+    },
+    'nav-wizard': {
+        "en": 'Setup Wizard',
+        "zh-CN": '接入向导',
     },
     'node-default-target-label': {
         "en": 'Default and check target of the node pool',
@@ -600,6 +708,14 @@ MESSAGES = {
     'node-filter-type-option-6': {
         "en": '🛑 Managed state disabled only',
         "zh-CN": '🛑 仅托管记录已关闭',
+    },
+    'node-quick-target-aria': {
+        "en": 'Node quick target',
+        "zh-CN": '节点快捷目标',
+    },
+    'node-search-ph': {
+        "en": 'Filter by node name, IP, port, container or tags...',
+        "zh-CN": '实时过滤节点名称、IP、端口、容器名或业务标签...',
     },
     'node-stats-badge': {
         "en": 'Reading the nodes',
@@ -870,8 +986,12 @@ MESSAGES = {
         "zh-CN": '❌ 请填写节点名称和主机 IP',
     },
     'openClientModal-17': {
-        "en": '❌ {error}{mode______edit_________________________________}',
-        "zh-CN": '❌ {error}{mode______edit_________________________________}',
+        "en": '❌ {error}{detail}',
+        "zh-CN": '❌ {error}{detail}',
+    },
+    'openClientModal-17-edit': {
+        "en": '. Close the dialog, reopen it to check the latest record, and try again.',
+        "zh-CN": '。请关闭并重新打开编辑，核对最新记录后重试。',
     },
     'openClientModal-18': {
         "en": 'Could not save it: {message}',
@@ -1365,6 +1485,34 @@ MESSAGES = {
         "en": '<code>127.0.0.1 (local execution)</code>',
         "zh-CN": '<code>127.0.0.1 (本机执行)</code>',
     },
+    'renderClientsTableRows-clone': {
+        "en": '📋 Clone',
+        "zh-CN": '📋 克隆节点',
+    },
+    'renderClientsTableRows-delete': {
+        "en": '🗑️ Delete',
+        "zh-CN": '🗑️ 删除节点',
+    },
+    'renderClientsTableRows-delete-confirm': {
+        "en": 'Stop managing and delete node "{cid}"?\nExisting managed settings are restored and verified first; on failure the registration stays. Deletion removes credentials and keeps only non-sensitive re-add fields.',
+        "zh-CN": '停止托管并删除节点 "{cid}"？\n已有托管先恢复并独立核验，失败将保留登记。删除会移除认证资料，仅保留加回所需非敏感信息。',
+    },
+    'renderClientsTableRows-edit': {
+        "en": '✏️ Edit',
+        "zh-CN": '✏️ 编辑参数',
+    },
+    'renderClientsTableRows-loopback-confirm': {
+        "en": 'The gateway {host}:{port} bound to node "{name}" is a loopback address; the remote node cannot reach it.\nEnable anyway?',
+        "zh-CN": '节点【{name}】绑定的网关 {host}:{port} 是本机回环地址，远程节点无法访问它。\n仍要开启吗？',
+    },
+    'renderClientsTableRows-speedtest': {
+        "en": '🔍 Probe',
+        "zh-CN": '🔍 测外网',
+    },
+    'renderClientsTableRows-test': {
+        "en": '⚡ Reachability',
+        "zh-CN": '⚡ 连通探测',
+    },
     'renderGatewaysTable': {
         "en": '<span class="t-pill success">Default gateway</span>',
         "zh-CN": '<span class="t-pill success">默认网关</span>',
@@ -1421,6 +1569,10 @@ MESSAGES = {
         "en": '✅ The bypass list is saved',
         "zh-CN": '✅ 直连白名单已保存',
     },
+    'renderGatewaysTable-edit-btn': {
+        "en": '✏️ Edit',
+        "zh-CN": '✏️ 编辑',
+    },
     'renderHandoverBlocks': {
         "en": 'Send a request on this machine',
         "zh-CN": '在本机发送业务请求',
@@ -1438,8 +1590,8 @@ MESSAGES = {
         "zh-CN": '开启节点代理',
     },
     'renderHandoverBlocks-3': {
-        "en": 'Target IP: {host} | Container: {container_name_____app_container_}',
-        "zh-CN": '目标 IP: {host} | 容器名: {container_name_____app_container_}',
+        "en": 'Target IP: {host} | Container: {container}',
+        "zh-CN": '目标 IP: {host} | 容器名: {container}',
     },
     'renderHandoverBlocks-4': {
         "en": 'Target IP: {host} | Bound gateway: {host_2}:{port}',
@@ -1468,6 +1620,14 @@ MESSAGES = {
     'renderLocalGatewayState': {
         "en": 'The local observation gateway is running at ',
         "zh-CN": '本机观测网关已启动：',
+    },
+    'renderLocalGatewayState-none': {
+        "en": '\nNo requests received yet.',
+        "zh-CN": '\n尚未收到请求。',
+    },
+    'renderLocalGatewayState-seen': {
+        "en": '\nVisited: {seen}',
+        "zh-CN": '\n已访问：{seen}',
     },
     'renderProbe': {
         "en": 'See the evidence of every hop',
@@ -1625,9 +1785,17 @@ MESSAGES = {
         "en": 'Not checked',
         "zh-CN": '尚未检测',
     },
+    'sb-quick-diag-label': {
+        "en": 'Refresh connectivity',
+        "zh-CN": '刷新连通性',
+    },
     'sb-run-btn-terminal-title': {
         "en": 'Request result',
         "zh-CN": '请求结果',
+    },
+    'sb-run-label': {
+        "en": 'Send GET request',
+        "zh-CN": '发送 GET 请求',
     },
     'sb-status-badge': {
         "en": 'Idle and ready',
@@ -1665,6 +1833,10 @@ MESSAGES = {
         "en": 'Configure a proxy for a remote machine or container',
         "zh-CN": '为远程机器或容器配置代理',
     },
+    'setup-controls-aria': {
+        "en": 'Gateway and request',
+        "zh-CN": '网关与请求',
+    },
     'setup-controls-option': {
         "en": 'Add a gateway',
         "zh-CN": '新增网关',
@@ -1684,6 +1856,10 @@ MESSAGES = {
     'setup-port-label': {
         "en": 'Port',
         "zh-CN": '端口',
+    },
+    'setup-quick-target-aria': {
+        "en": 'Home quick target',
+        "zh-CN": '首页快捷目标',
     },
     'setup-reload': {
         "en": 'Read the configuration again',
@@ -1785,9 +1961,21 @@ MESSAGES = {
         "en": 'Confirm the target and the gateway before the configuration is applied.',
         "zh-CN": '请确认目标和网关，再下发代理配置。',
     },
+    'step-1-explain': {
+        "en": 'Select an HTTP or mixed proxy gateway the target node can reach. The button below sends a request from the console through that gateway.',
+        "zh-CN": '选择目标节点能连接的 HTTP 或混合代理网关。下方按钮从控制台经过该网关请求测试站点。',
+    },
     'step-1-result-res-msg': {
         "en": 'Click Probe to check whether the gateway port and service answer. Step 2 unlocks once the check succeeds.',
         "zh-CN": '点击【探测连通性】以验证网关端口与服务是否可用。验证成功后将自动解锁步骤 2。',
+    },
+    'step-2-explain': {
+        "en": 'Choose the worker node that needs proxy access (edge node, workstation, or another host), or register a new one below:',
+        "zh-CN": '选择需要出海访问的业务节点（例如边缘计算节点、开发工作站或任意新接入的机器）。支持在下方直接登记新机器：',
+    },
+    'step-3-explain': {
+        "en": 'The console will request the configured target sites through the selected gateway and record each HTTP status and latency.',
+        "zh-CN": '控制台将通过所选网关请求配置中的目标站点，记录各自的 HTTP 状态和耗时。',
     },
     'tab-handbook-a': {
         "en": 'Project home',
@@ -1837,6 +2025,22 @@ MESSAGES = {
         "en": 'Net-Proxy-Tool — cross-platform console for LAN proxying and Docker network isolation (v1.5.0)',
         "zh-CN": 'Net-Proxy-Tool 通用跨平台局域网出海与 Docker 容器隔离控制中心 (v1.5.0)',
     },
+    'top-add-client-label': {
+        "en": 'Register node',
+        "zh-CN": '登记新业务节点',
+    },
+    'top-add-gw-label': {
+        "en": 'Add gateway',
+        "zh-CN": '添加新网关节点',
+    },
+    'top-audit-label': {
+        "en": 'Audit log',
+        "zh-CN": '审计日志',
+    },
+    'top-audit-title': {
+        "en": 'View recent node operations and switch audit log',
+        "zh-CN": '查看最近的节点运维与开关审计流水',
+    },
     'top-clients-tbody-card-subdesc': {
         "en": 'Manage every proxy gateway, set the default gateway, test connectivity and assign gateways to many nodes',
         "zh-CN": '管理所有可用的代理网关服务器，支持自由设置默认网关、测试连通性与多对多分配',
@@ -1845,6 +2049,22 @@ MESSAGES = {
         "en": '🖥️ Gateway pool',
         "zh-CN": '🖥️ 代理工作站网关池 (Gateway Pool)',
     },
+    'top-disable-all-label': {
+        "en": 'Restore listed baselines',
+        "zh-CN": '恢复当前列表基线',
+    },
+    'top-disable-all-title': {
+        "en": 'Restore pre-enable snapshots for listed nodes',
+        "zh-CN": '按各节点启用前的快照恢复配置',
+    },
+    'top-enable-all-label': {
+        "en": 'Enable listed nodes',
+        "zh-CN": '开启当前列表节点',
+    },
+    'top-enable-all-title': {
+        "en": 'Enable proxy on all listed nodes',
+        "zh-CN": '一键将列表中的所有节点切换为出海状态',
+    },
     'top-gateways-tbody-card-subdesc': {
         "en": 'Tools that honour NO_PROXY bypass the proxy for the entries in this list. Wildcards and CIDR ranges depend on the tool.',
         "zh-CN": '接受 NO_PROXY 的工具会按此列表绕过代理。域名通配和 CIDR 的支持取决于具体工具。',
@@ -1852,6 +2072,18 @@ MESSAGES = {
     'top-gateways-tbody-h2': {
         "en": '🛡️ LAN bypass list (NO_PROXY)',
         "zh-CN": '🛡️ 局域网直连白名单规则 (NO_PROXY)',
+    },
+    'top-health-check-label': {
+        "en": 'Check all nodes',
+        "zh-CN": '全网巡检',
+    },
+    'top-health-check-title': {
+        "en": 'Probe all nodes concurrently for status and latency',
+        "zh-CN": '对所有节点并发探测出海状态与延迟',
+    },
+    'top-save-noproxy-label': {
+        "en": 'Save bypass rules',
+        "zh-CN": '保存白名单规则',
     },
     'unlockStep2': {
         "en": '● Binding to confirm',
@@ -1890,8 +2122,8 @@ MESSAGES = {
         "zh-CN": '⚪ 托管记录 · 已关闭',
     },
     'updateNodeStatsBadge': {
-        "en": '{total} nodes ({onCount} verified as enabled, {offCount} verified as restored, {total___onCount___offCount} not verified)',
-        "zh-CN": '共 {total} 个节点 ({onCount} 已核验开启, {offCount} 已核验恢复, {total___onCount___offCount} 未核验)',
+        "en": '{total} nodes ({onCount} verified as enabled, {offCount} verified as restored, {unverified} not verified)',
+        "zh-CN": '共 {total} 个节点 ({onCount} 已核验开启, {offCount} 已核验恢复, {unverified} 未核验)',
     },
     'updateWizardClientMeta': {
         "en": 'Not specified',
@@ -1961,6 +2193,18 @@ MESSAGES = {
         "en": 'Bound gateway:',
         "zh-CN": '绑定路由:',
     },
+    'wizard-btn-node-test-label': {
+        "en": 'Retest node connectivity',
+        "zh-CN": '实时复测目标连通性',
+    },
+    'wizard-btn-proxy-off-label': {
+        "en": 'Stop & restore baseline',
+        "zh-CN": '停止托管并恢复启用前配置',
+    },
+    'wizard-btn-proxy-on-label': {
+        "en": 'Enable node proxy',
+        "zh-CN": '开启节点代理',
+    },
     'wizard-client-meta-meta-label': {
         "en": 'Node IP:',
         "zh-CN": '节点 IP:',
@@ -1972,6 +2216,10 @@ MESSAGES = {
     'wizard-compare-summary': {
         "en": 'Terminal GET command',
         "zh-CN": '终端 GET 命令',
+    },
+    'wizard-confirm-client-label': {
+        "en": 'Save node & gateway binding',
+        "zh-CN": '保存节点与网关绑定',
     },
     'wizard-diag-time': {
         "en": 'Not diagnosed',
@@ -2001,13 +2249,29 @@ MESSAGES = {
         "en": 'Scope and restoration',
         "zh-CN": '操作范围与恢复',
     },
+    'wizard-open-add-client-label': {
+        "en": 'Register new node',
+        "zh-CN": '登记新业务节点',
+    },
     'wizard-probe-command-btn-copy': {
         "en": 'Copy the command',
         "zh-CN": '复制命令',
     },
+    'wizard-quick-target-aria': {
+        "en": 'Wizard quick target',
+        "zh-CN": '向导快捷目标',
+    },
     'wizard-readonly-test': {
         "en": 'Read-only diagnosis from the node',
         "zh-CN": '从节点只读诊断',
+    },
+    'wizard-set-default-gw-btn': {
+        "en": 'Set as global default',
+        "zh-CN": '设为全局默认网关',
+    },
+    'wizard-start-diag-label': {
+        "en": 'Run full diagnostic',
+        "zh-CN": '开始全链路穿透体检',
     },
     'wizard-switch-badge': {
         "en": '⚪ Managed proxy not enabled',
@@ -2020,6 +2284,10 @@ MESSAGES = {
     'wizard-target-disp-sub': {
         "en": 'The account or the container appears here once you choose a target.',
         "zh-CN": '选择目标后将在此显示账号或容器。',
+    },
+    'wizard-test-gw-btn-label': {
+        "en": 'Probe gateway',
+        "zh-CN": '探测该网关连通性',
     },
     '⚠️ 容器探测异常: {e}': {
         "en": '⚠️ The container probe failed: {e}',

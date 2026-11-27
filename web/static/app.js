@@ -490,7 +490,7 @@ document.addEventListener("DOMContentLoaded", () => {
     localGatewayDemoBtn.hidden = true;
     const seen = [...new Set((state.records || []).map(record => record.host + ":" + record.port))];
     localGatewayState.textContent = t("renderLocalGatewayState") + state.address +
-      (seen.length ? "\n已访问：" + seen.join(", ") : "\n尚未收到请求。");
+      (seen.length ? t("renderLocalGatewayState-seen", {seen: seen.join(", ")}) : t("renderLocalGatewayState-none"));
     return state;
   }
 
@@ -692,7 +692,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const gateway = env.matched_gateway;
     const context = verification.verified && verification.verification_scope === "login_and_managed_files"
       ? t("restoredEnvironmentNote") : t("restoredEnvironmentNote-2");
-    if (gateway) return t("restoredEnvironmentNote-3", {context, port_});
+    if (gateway) return t("restoredEnvironmentNote-3", {context, port_: formatPeer(gateway.host, gateway.port)});
     return env.proxy_present ? t("restoredEnvironmentNote-4", {context}) : t("restoredEnvironmentNote-5", {context});
   }
 
@@ -877,7 +877,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       if (res.ok) {
         await loadConfig();
-        alert(t("updateWizardClientMeta-13", {name}));
+        alert(t("updateWizardClientMeta-13", {name: selectedWizardGateway.name}));
       }
     } catch (e) {
       alert(t("updateWizardClientMeta-14") + e.message);
@@ -947,7 +947,7 @@ document.addEventListener("DOMContentLoaded", () => {
           <span class="t-cat">${escapeHtml(typeof item === 'string' ? item : (item?.desc || item?.category || item?.url || ''))}</span>
         </div>
         <div class="t-status">
-          <span class="t-pill waiting">等待测试</span>
+          <span class="t-pill waiting">${escapeHtml(t("initTargetGridPlaceholder-waiting"))}</span>
           <span class="t-rtt">-- ms</span>
         </div>
       `;
@@ -980,7 +980,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await res.json();
 
       if (!step2Complete || selectedWizardClient?.id !== client.id || selectedWizardGateway?.id !== gateway.id) return;
-      wizardDiagTime.textContent = t("initTargetGridPlaceholder-5", {timestamp});
+      wizardDiagTime.textContent = t("initTargetGridPlaceholder-5", {timestamp: data.timestamp});
       let onlineCount = 0;
       const results = data.targets || [];
 
@@ -993,7 +993,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (target.status === "online") {
           onlineCount++;
           pill.className = "t-pill success";
-          pill.textContent = t("initTargetGridPlaceholder-6", {code});
+          pill.textContent = t("initTargetGridPlaceholder-6", {code: target.code});
           rtt.textContent = `${target.latency_ms} ms`;
         } else {
           pill.className = "t-pill failed";
@@ -1007,7 +1007,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (emptyList || (results.length && onlineCount >= Math.min(2, results.length))) {
         step3Complete = true;
         statusTagStep3.className = results.length && onlineCount === results.length ? "step-status-tag success" : "step-status-tag";
-        statusTagStep3.textContent = emptyList ? t("initTargetGridPlaceholder-10") : t("initTargetGridPlaceholder-9", {onlineCount, length});
+        statusTagStep3.textContent = emptyList ? t("initTargetGridPlaceholder-10") : t("initTargetGridPlaceholder-9", {onlineCount, length: results.length});
         pipeStep3.className = "pipeline-step completed";
         pipeStep3.querySelector(".pipe-name").textContent = emptyList ? t("initTargetGridPlaceholder-11") : t("initTargetGridPlaceholder-12");
 
@@ -1018,7 +1018,7 @@ document.addEventListener("DOMContentLoaded", () => {
         cardStep4.inert = true;
         cardStep4.classList.add("locked-card");
         statusTagStep3.className = "step-status-tag";
-        statusTagStep3.textContent = t("initTargetGridPlaceholder-13", {onlineCount, length});
+        statusTagStep3.textContent = t("initTargetGridPlaceholder-13", {onlineCount, length: results.length});
         alert(t("initTargetGridPlaceholder-14"));
       }
     } catch (err) {
@@ -1067,9 +1067,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (wizardTargetDispName) wizardTargetDispName.textContent = `${client.name} (${osType.toUpperCase()})`;
     if (wizardTargetDispSub) {
       if (osType === "docker") {
-        wizardTargetDispSub.textContent = t("renderHandoverBlocks-3", {host, container_name_____app_container_});
+        wizardTargetDispSub.textContent = t("renderHandoverBlocks-3", {host: client.host, container: client.container_name || "app-container"});
       } else {
-        wizardTargetDispSub.textContent = t("renderHandoverBlocks-4", {host, host_2, port});
+        wizardTargetDispSub.textContent = t("renderHandoverBlocks-4", {host: client.host, host_2: gw.host, port: gw.port});
       }
     }
 
@@ -1306,7 +1306,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const total = cachedClients.length;
     const onCount = cachedClients.filter(c => c.managed_state === "enabled").length;
     const offCount = cachedClients.filter(c => c.managed_state === "disabled").length;
-    nodeStatsBadge.textContent = t("updateNodeStatsBadge", {total, onCount, offCount, total___onCount___offCount});
+    nodeStatsBadge.textContent = t("updateNodeStatsBadge", {total, onCount, offCount, unverified: total - onCount - offCount});
   }
 
   const nodeTargets = new Map();
@@ -1365,7 +1365,7 @@ document.addEventListener("DOMContentLoaded", () => {
         addrBadge = t("renderClientsTableRows-10");
         addrRow = `<code>${escapeHtml(c.ssh_user || 'ubuntu')}@${escapeHtml(c.ssh_host || c.host)}:${c.port || 22}</code> <span style="font-size:11px;color:var(--text-dim);">&rarr; [${escapeHtml(c.container_name || c.name)}]</span>`;
       } else if (c.port && c.port != 22) {
-        addrBadge = t("renderClientsTableRows-11", {port});
+        addrBadge = t("renderClientsTableRows-11", {port: c.port});
       }
 
       const tr = document.createElement("tr");
@@ -1389,7 +1389,7 @@ document.addEventListener("DOMContentLoaded", () => {
         </td>
         <td>
           <strong>${escapeHtml(gwName)}</strong>
-          <div style="font-size:11px;color:var(--text-dim);">${boundGw ? t("renderClientsTableRows-12", {port}) : ''}</div>
+          <div style="font-size:11px;color:var(--text-dim);">${boundGw ? t("renderClientsTableRows-12", {port: boundGw.port}) : ''}</div>
         </td>
         <td>
           <div class="status-capsule ${verifiedState === 'enabled' ? 'on' : verifiedState === 'disabled' ? 'off' : 'unknown'}">
@@ -1403,20 +1403,20 @@ document.addEventListener("DOMContentLoaded", () => {
           ${c.managed_state === "disabled" ? `<div class="restoration-note">${escapeHtml(restoredEnvironmentNote(c.verification))}</div>` : ''}
         </td>
         <td style="text-align: right;">
-          <div class="row-target"><select class="form-select" data-node-target aria-label=t("renderClientsTableRows-17")></select>
-            <input type="url" class="form-input" data-node-custom required aria-label=t("renderClientsTableRows-18") placeholder="https://…" hidden></div>
+          <div class="row-target"><select class="form-select" data-node-target aria-label="${escapeHtml(t("renderClientsTableRows-17"))}"></select>
+            <input type="url" class="form-input" data-node-custom required aria-label="${escapeHtml(t("renderClientsTableRows-18"))}" placeholder="https://…" hidden></div>
           <div class="table-actions-modern">
-            <button class="btn-speedtest" data-action="test-node-out" data-id="${escapeHtml(c.id)}" title=t("renderClientsTableRows-19")>
-              🔍 测外网 <span class="rtt-pill" id="rtt-${escapeHtml(c.id)}"></span>
+            <button class="btn-speedtest" data-action="test-node-out" data-id="${escapeHtml(c.id)}" title="${escapeHtml(t("renderClientsTableRows-19"))}">
+              ${escapeHtml(t("renderClientsTableRows-speedtest"))} <span class="rtt-pill" id="rtt-${escapeHtml(c.id)}"></span>
             </button>
             <div class="action-dropdown-wrap">
-              <button class="btn-dropdown-toggle" title=t("renderClientsTableRows-20")>•••</button>
+              <button class="btn-dropdown-toggle" title="${escapeHtml(t("renderClientsTableRows-20"))}">•••</button>
               <div class="action-dropdown-menu">
-                <button class="dropdown-item" data-action="edit-client" data-id="${escapeHtml(c.id)}">✏️ 编辑参数</button>
-                <button class="dropdown-item" data-action="clone-client" data-id="${escapeHtml(c.id)}">📋 克隆节点</button>
-                <button class="dropdown-item" data-action="test-client" data-id="${escapeHtml(c.id)}" data-host="${escapeHtml(c.host)}" data-port="${c.port || 22}">⚡ 连通探测</button>
-                ${!localWindows ? t("renderClientsTableRows-21", {id_}) : ''}
-                <button class="dropdown-item danger" data-action="delete-client" data-id="${escapeHtml(c.id)}">🗑️ 删除节点</button>
+                <button class="dropdown-item" data-action="edit-client" data-id="${escapeHtml(c.id)}">${escapeHtml(t("renderClientsTableRows-edit"))}</button>
+                <button class="dropdown-item" data-action="clone-client" data-id="${escapeHtml(c.id)}">${escapeHtml(t("renderClientsTableRows-clone"))}</button>
+                <button class="dropdown-item" data-action="test-client" data-id="${escapeHtml(c.id)}" data-host="${escapeHtml(c.host)}" data-port="${c.port || 22}">${escapeHtml(t("renderClientsTableRows-test"))}</button>
+                ${!localWindows ? t("renderClientsTableRows-21", {id_: escapeHtml(c.id)}) : ''}
+                <button class="dropdown-item danger" data-action="delete-client" data-id="${escapeHtml(c.id)}">${escapeHtml(t("renderClientsTableRows-delete"))}</button>
               </div>
             </div>
           </div>
@@ -1462,11 +1462,11 @@ document.addEventListener("DOMContentLoaded", () => {
         const actionType = btn.getAttribute("data-action-type");
         const client = appConfig.clients.find(item => item.id === cid);
         if (isWindowsWorkstation(client)) { openGatewayRequest(client.bound_gateway_id || activeGateway?.id || ""); return; }
-        if (actionType === "off" && !confirm(t("renderClientsTableRows-24", {name}))) return;
+        if (actionType === "off" && !confirm(t("renderClientsTableRows-24", {name: client.name}))) return;
         if (actionType === "on" && client.access_mode !== "local") {
           const boundGw = (appConfig.gateways || []).find(g => g.id === client.bound_gateway_id);
           if (boundGw && isLoopbackHost(boundGw.host)) {
-            const ok = confirm(`节点【${client.name}】绑定的网关 ${boundGw.host}:${boundGw.port} 是本机回环地址，远程节点无法访问它。\n仍要开启吗？`);
+            const ok = confirm(t("renderClientsTableRows-loopback-confirm", {name: client.name, host: boundGw.host, port: boundGw.port}));
             if (!ok) return;
           }
         }
@@ -1546,7 +1546,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const cid = btn.getAttribute("data-id");
         const client = cachedClients.find(item => item.id === cid);
         if (!client) return;
-        if (!confirm(`停止托管并删除节点 "${cid}"？\n已有托管先恢复并独立核验，失败将保留登记。删除会移除认证资料，仅保留加回所需非敏感信息。`)) return;
+        if (!confirm(t("renderClientsTableRows-delete-confirm", {cid}))) return;
         try {
           const res = await fetch("/api/clients/delete", {
             method: "POST",
@@ -1579,7 +1579,7 @@ document.addEventListener("DOMContentLoaded", () => {
           });
           const d = await res.json();
           if (d.online) {
-            alert(t("renderClientsTableRows-33", {host, port, latency_ms}));
+            alert(t("renderClientsTableRows-33", {host, port, latency_ms: d.latency_ms}));
           } else {
             alert(t("renderClientsTableRows-34", {host, port}));
           }
@@ -1614,7 +1614,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // 一键全部开启出海
   topEnableAllBtn?.addEventListener("click", async () => {
     const selected = filterClientsList();
-    if (!selected.length || !confirm(t("renderClientsTable", {length}))) return;
+    if (!selected.length || !confirm(t("renderClientsTable", {length: selected.length}))) return;
     const selections = selected.map(nodeRequest);
     topEnableAllBtn.disabled = true;
     topEnableAllBtn.innerHTML = t("renderClientsTable-2");
@@ -1640,7 +1640,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const selected = filterClientsList();
     if (!selected.length) return;
     const selections = selected.map(nodeRequest);
-    if (!confirm(t("renderClientsTable-6", {length}))) {
+    if (!confirm(t("renderClientsTable-6", {length: selected.length}))) {
       return;
     }
     topDisableAllBtn.disabled = true;
@@ -1717,7 +1717,7 @@ document.addEventListener("DOMContentLoaded", () => {
         auditTableTbody.appendChild(tr);
       });
     } catch (e) {
-      auditTableTbody.innerHTML = t("loadAuditLogs-5", {message});
+      auditTableTbody.innerHTML = t("loadAuditLogs-5", {message: escapeHtml(e.message)});
     }
   }
 
@@ -1750,10 +1750,10 @@ document.addEventListener("DOMContentLoaded", () => {
         <td style="color:var(--text-muted); font-size:12px;">${escapeHtml(g.description || '-')}</td>
         <td>
           <div class="table-actions">
-            ${!isDefault ? t("renderGatewaysTable-3", {id_}) : ''}
-            <button class="btn-mini" data-action="test-gw" data-host="${escapeHtml(g.host)}" data-port="${escapeHtml(g.port)}">⚡ 测通</button>
-            <button class="btn-mini" data-action="edit-gw" data-id="${escapeHtml(g.id)}">✏️ 编辑</button>
-            ${!isDefault ? t("renderGatewaysTable-4", {id_}) : ''}
+            ${!isDefault ? t("renderGatewaysTable-3", {id_: escapeHtml(g.id)}) : ''}
+            <button class="btn-mini" data-action="test-gw" data-host="${escapeHtml(g.host)}" data-port="${escapeHtml(g.port)}">${escapeHtml(t("renderGatewaysTable-6"))}</button>
+            <button class="btn-mini" data-action="edit-gw" data-id="${escapeHtml(g.id)}">${escapeHtml(t("renderGatewaysTable-edit-btn"))}</button>
+            ${!isDefault ? t("renderGatewaysTable-4", {id_: escapeHtml(g.id)}) : ''}
           </div>
         </td>
       `;
@@ -1919,7 +1919,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (target) {
           formClientId.value = `${target.id}-copy`;
           formClientId.disabled = false;
-          formClientName.value = t("openClientModal-4", {name});
+          formClientName.value = t("openClientModal-4", {name: target.name});
           formClientHost.value = target.host || "";
           if (formClientPort) formClientPort.value = target.port || 22;
           formClientOs.value = target.os_type || "linux";
@@ -1978,7 +1978,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const target = (appConfig.clients || []).find(c => c.id === cid);
       if (!target) return;
       formClientId.value = target.id;
-      formClientId.disabled = true; // ID不可改
+      // ID不可改
+      formClientId.disabled = true;
       formClientName.value = target.name || "";
       formClientHost.value = target.host || "";
       if (formClientPort) formClientPort.value = target.port || 22;
@@ -2075,7 +2076,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     } catch (e) {
       formClientHint.style.color = "var(--danger)";
-      formClientHint.textContent = t("openClientModal-12", {message});
+      formClientHint.textContent = t("openClientModal-12", {message: e.message});
     } finally {
       modalClientTestBtn.disabled = false;
       modalClientTestBtn.innerHTML = t("openClientModal-13");
@@ -2170,12 +2171,12 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       } else {
         formClientHint.style.color = "var(--danger)";
-        formClientHint.textContent = t("openClientModal-17", {error, mode______edit_________________________________});
+        formClientHint.textContent = t("openClientModal-17", {error: data.error, detail: mode === "edit" ? t("openClientModal-17-edit") : ""});
         await loadConfig();
       }
     } catch (e) {
       formClientHint.style.color = "var(--danger)";
-      formClientHint.textContent = t("openClientModal-18", {message});
+      formClientHint.textContent = t("openClientModal-18", {message: e.message});
     } finally {
       modalClientSaveBtn.disabled = false;
     }
@@ -2241,7 +2242,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     } catch (e) {
       formGwHint.style.color = "var(--danger)";
-      formGwHint.textContent = t("openGatewayModal-4", {message});
+      formGwHint.textContent = t("openGatewayModal-4", {message: e.message});
     } finally {
       modalGwTestBtn.disabled = false;
     }
@@ -2289,7 +2290,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     } catch (e) {
       formGwHint.style.color = "var(--danger)";
-      formGwHint.textContent = t("openGatewayModal-6", {message});
+      formGwHint.textContent = t("openGatewayModal-6", {message: e.message});
     } finally {
       modalGwSaveBtn.disabled = false;
     }

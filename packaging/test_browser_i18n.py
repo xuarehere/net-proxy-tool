@@ -49,7 +49,11 @@ def run():
 
         # A browser that asks for English gets English.
         english = browser.new_page()
-        english.add_init_script("try { localStorage.setItem('npt-lang', 'en'); } catch (error) {}")
+        english.add_init_script(
+            "try { if (!sessionStorage.getItem('npt-i18n-init')) {"
+            " sessionStorage.setItem('npt-i18n-init', '1');"
+            " localStorage.setItem('npt-lang', 'en'); } } catch (error) {}"
+        )
         english.goto(url)
         expect(english.locator("#setup-title")).to_have_text("Connect your HTTP proxy")
         expect(english.locator("#setup-test")).to_have_text("Send a proxy request")

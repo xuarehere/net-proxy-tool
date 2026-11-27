@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -66,6 +67,7 @@ class ConfigurationWriteTests(unittest.TestCase):
 
 
 class ConfigurationPermissionTests(unittest.TestCase):
+    @unittest.skipUnless(os.name != "nt", "POSIX file mode bits are not enforced on Windows")
     def test_loose_mode_is_reported_without_content(self):
         with tempfile.TemporaryDirectory(prefix="npt-perm-") as directory:
             path = Path(directory) / "config.json"
@@ -88,6 +90,7 @@ class ConfigurationPermissionTests(unittest.TestCase):
 
 
 class AccountNameTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("sh"), "requires a POSIX shell")
     def test_recorded_account_name_has_no_trailing_newline(self):
         script = account_name_probe()
         self.assertIn("printf", script)

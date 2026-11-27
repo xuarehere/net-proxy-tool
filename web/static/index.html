@@ -22,7 +22,7 @@
       </div>
 
       <div class="navbar-right">
-        <button class="lang-toggle" id="lang-toggle" type="button" title="切换界面语言 / Switch the interface language">EN</button>
+        <button class="lang-toggle" id="lang-toggle" type="button" title="切换界面语言" data-i18n-title="lang-toggle-title">EN</button>
         <div class="global-status-pill" id="global-status-pill">
           <span class="status-indicator-dot"></span>
           <span id="global-gw-status-text" data-i18n="global-gw-status-text">尚未选择网关</span>
@@ -30,16 +30,16 @@
         <!-- 导航 Tabs -->
         <nav class="nav-tab-group">
           <button class="nav-btn active" data-tab="tab-wizard">
-            <span class="nav-icon">🎯</span> 接入向导
+            <span class="nav-icon">🎯</span> <span data-i18n="nav-wizard">接入向导</span>
           </button>
           <button class="nav-btn" data-tab="tab-sandbox">
-            <span class="nav-icon">⚡</span> 业务请求
+            <span class="nav-icon">⚡</span> <span data-i18n="nav-sandbox">业务请求</span>
           </button>
           <button class="nav-btn" data-tab="tab-topology">
-            <span class="nav-icon">🌐</span> 拓扑与节点管理
+            <span class="nav-icon">🌐</span> <span data-i18n="nav-topology">拓扑与节点管理</span>
           </button>
           <button class="nav-btn" data-tab="tab-handbook">
-            <span class="nav-icon">📖</span> 开发者手册
+            <span class="nav-icon">📖</span> <span data-i18n="nav-handbook">开发者手册</span>
           </button>
         </nav>
       </div>
@@ -68,7 +68,7 @@
             <div id="local-gateway-state" role="status" aria-live="polite"></div>
           </div>
           <form id="setup-form">
-            <fieldset id="setup-controls" disabled aria-label="网关与请求">
+            <fieldset id="setup-controls" disabled aria-label="网关与请求" data-i18n-aria-label="setup-controls-aria">
             <label class="setup-selection"><span data-i18n="setup-selection-label">选择操作</span><select id="setup-select" class="form-select"><option value="" data-i18n="setup-controls-option">新增网关</option></select></label>
             <div class="setup-fields">
               <label><span data-i18n="setup-name-label">网关名称</span><input id="setup-name" class="form-input" required value="本机代理"></label>
@@ -78,7 +78,7 @@
             <button class="btn btn-secondary" id="setup-save" type="submit" data-i18n="setup-save">保存新网关</button>
             <button class="btn btn-secondary" id="setup-default" type="button" hidden data-i18n="setup-default">设为默认网关</button>
             <div class="probe-targets">
-                <label><span data-i18n="quick-target-label">快捷目标</span><select class="form-select" data-target-input="setup-url" aria-label="首页快捷目标"></select></label>
+                <label><span data-i18n="quick-target-label">快捷目标</span><select class="form-select" data-target-input="setup-url" aria-label="首页快捷目标" data-i18n-aria-label="setup-quick-target-aria"></select></label>
                 <label class="setup-url"><span data-i18n="request-target-label">请求目标</span><input required id="setup-url" class="form-input" type="url" value="https://www.google.com/"></label>
               </div>
             <button class="btn btn-primary" id="setup-test" type="button" data-i18n="setup-test">发送代理请求</button>
@@ -128,24 +128,20 @@
               </div>
               <span class="step-status-tag" id="status-tag-step-1" data-i18n="status-tag-step-1">● 等待探测</span>
             </div>
-            <p class="step-explain">
-              选择目标节点能连接的 HTTP 或混合代理网关。下方按钮从控制台经过该网关请求测试站点。
-            </p>
+            <p class="step-explain" data-i18n="step-1-explain">选择目标节点能连接的 HTTP 或混合代理网关。下方按钮从控制台经过该网关请求测试站点。</p>
             <div class="step-body-row">
               <div class="input-inline-group">
                 <label for="wizard-gw-select" data-i18n="status-tag-step-1-label">选择出网代理网关:</label>
                 <select id="wizard-gw-select" class="form-select"></select>
               </div>
               <div class="probe-targets">
-                <label><span data-i18n="quick-target-label">快捷目标</span><select class="form-select" data-target-input="wizard-test-url" aria-label="向导快捷目标"></select></label>
+                <label><span data-i18n="quick-target-label">快捷目标</span><select class="form-select" data-target-input="wizard-test-url" aria-label="向导快捷目标" data-i18n-aria-label="wizard-quick-target-aria"></select></label>
                 <label><span data-i18n="request-target-label">请求目标</span><input id="wizard-test-url" type="url" required class="form-input" value="https://www.google.com/"></label>
               </div>
               <button class="btn btn-primary" id="wizard-test-gw-btn">
-                <span class="btn-icon">⚡</span> 探测该网关连通性
+                <span class="btn-icon">⚡</span> <span data-i18n="wizard-test-gw-btn-label">探测该网关连通性</span>
               </button>
-              <button class="btn btn-secondary" id="wizard-set-default-gw-btn">
-                设为全局默认网关
-              </button>
+              <button class="btn btn-secondary" id="wizard-set-default-gw-btn" data-i18n="wizard-set-default-gw-btn">设为全局默认网关</button>
             </div>
             <div class="step-result-banner" id="step-1-result" role="status" aria-live="polite">
               <span class="res-msg" data-i18n="step-1-result-res-msg">点击【探测连通性】以验证网关端口与服务是否可用。验证成功后将自动解锁步骤 2。</span>
@@ -169,19 +165,17 @@
               </div>
               <span class="step-status-tag" id="status-tag-step-2" data-i18n="status-tag-step-2">🔒 待解锁</span>
             </div>
-            <p class="step-explain">
-              选择需要出海访问的业务节点（例如边缘计算节点、开发工作站或任意新接入的机器）。支持在下方直接登记新机器：
-            </p>
+            <p class="step-explain" data-i18n="step-2-explain">选择需要出海访问的业务节点（例如边缘计算节点、开发工作站或任意新接入的机器）。支持在下方直接登记新机器：</p>
             <div class="step-body-row">
               <div class="input-inline-group">
                 <label for="wizard-client-select" data-i18n="status-tag-step-2-label">选择目标业务节点:</label>
                 <select id="wizard-client-select" class="form-select"></select>
               </div>
               <button class="btn btn-secondary" id="wizard-open-add-client-btn">
-                <span class="btn-icon">➕</span> 登记新业务节点
+                <span class="btn-icon">➕</span> <span data-i18n="wizard-open-add-client-label">登记新业务节点</span>
               </button>
               <button class="btn btn-primary" id="wizard-confirm-client-btn">
-                <span class="btn-icon">✅</span> 保存节点与网关绑定
+                <span class="btn-icon">✅</span> <span data-i18n="wizard-confirm-client-label">保存节点与网关绑定</span>
               </button>
             </div>
             <!-- 节点属性卡片 -->
@@ -214,12 +208,10 @@
               </div>
               <span class="step-status-tag" id="status-tag-step-3" data-i18n="status-tag-step-3">🔒 待解锁</span>
             </div>
-            <p class="step-explain">
-              控制台将通过所选网关请求配置中的目标站点，记录各自的 HTTP 状态和耗时。
-            </p>
+            <p class="step-explain" data-i18n="step-3-explain">控制台将通过所选网关请求配置中的目标站点，记录各自的 HTTP 状态和耗时。</p>
             <div class="diag-action-bar">
               <button class="btn btn-primary" id="wizard-start-diag-btn">
-                <span class="btn-icon">🚀</span> 开始全链路穿透体检
+                <span class="btn-icon">🚀</span> <span data-i18n="wizard-start-diag-label">开始全链路穿透体检</span>
               </button>
               <span class="diag-timestamp" id="wizard-diag-time" data-i18n="wizard-diag-time">未诊断</span>
             </div>
@@ -264,13 +256,13 @@
               <!-- 核心一键操作按钮组 -->
               <div class="auto-action-buttons">
                 <button class="btn btn-primary btn-lg" id="wizard-btn-proxy-on">
-                  <span class="btn-icon">⚡</span> 开启节点代理
+                  <span class="btn-icon">⚡</span> <span data-i18n="wizard-btn-proxy-on-label">开启节点代理</span>
                 </button>
                 <button class="btn btn-secondary btn-lg" id="wizard-btn-proxy-off">
-                  <span class="btn-icon">🛑</span> 停止托管并恢复启用前配置
+                  <span class="btn-icon">🛑</span> <span data-i18n="wizard-btn-proxy-off-label">停止托管并恢复启用前配置</span>
                 </button>
                 <button class="btn btn-outline btn-lg" id="wizard-btn-node-test">
-                  <span class="btn-icon">🔍</span> 实时复测目标连通性
+                  <span class="btn-icon">🔍</span> <span data-i18n="wizard-btn-node-test-label">实时复测目标连通性</span>
                 </button>
               </div>
 
@@ -342,7 +334,7 @@
             </div>
             <div class="header-actions">
               <button class="btn btn-secondary btn-sm" id="sb-quick-diag-btn">
-                <span class="btn-icon">🔄</span> 刷新连通性
+                <span class="btn-icon">🔄</span> <span data-i18n="sb-quick-diag-label">刷新连通性</span>
               </button>
             </div>
           </div>
@@ -368,7 +360,7 @@
               </div>
 
               <button class="btn btn-primary" id="sb-run-btn">
-                <span class="btn-icon">🚀</span> 发送 GET 请求
+                <span class="btn-icon">🚀</span> <span data-i18n="sb-run-label">发送 GET 请求</span>
               </button>
             </div>
           </div>
@@ -405,26 +397,26 @@
               <p class="card-subdesc" data-i18n="tab-topology-card-subdesc">纳管团队的所有计算设备、工控机与边缘节点，支持动态增加、编辑、删除与连通预检</p>
             </div>
             <div class="header-actions">
-              <button class="btn btn-secondary" id="top-enable-all-btn" title="一键将列表中的所有节点切换为出海状态">
-                <span class="btn-icon">⚡</span> 开启当前列表节点
+              <button class="btn btn-secondary" id="top-enable-all-btn" title="一键将列表中的所有节点切换为出海状态" data-i18n-title="top-enable-all-title">
+                <span class="btn-icon">⚡</span> <span data-i18n="top-enable-all-label">开启当前列表节点</span>
               </button>
-              <button class="btn btn-danger-soft" id="top-disable-all-btn" title="按各节点启用前的快照恢复配置">
-                <span class="btn-icon">🛑</span> 恢复当前列表基线
+              <button class="btn btn-danger-soft" id="top-disable-all-btn" title="按各节点启用前的快照恢复配置" data-i18n-title="top-disable-all-title">
+                <span class="btn-icon">🛑</span> <span data-i18n="top-disable-all-label">恢复当前列表基线</span>
               </button>
-              <button class="btn btn-secondary" id="top-health-check-btn" title="对所有节点并发探测出海状态与延迟">
-                <span class="btn-icon">🔄</span> 全网巡检
+              <button class="btn btn-secondary" id="top-health-check-btn" title="对所有节点并发探测出海状态与延迟" data-i18n-title="top-health-check-title">
+                <span class="btn-icon">🔄</span> <span data-i18n="top-health-check-label">全网巡检</span>
               </button>
-              <button class="btn btn-secondary" id="top-audit-btn" title="查看最近的节点运维与开关审计流水">
-                <span class="btn-icon">📜</span> 审计日志
+              <button class="btn btn-secondary" id="top-audit-btn" title="查看最近的节点运维与开关审计流水" data-i18n-title="top-audit-title">
+                <span class="btn-icon">📜</span> <span data-i18n="top-audit-label">审计日志</span>
               </button>
               <button class="btn btn-primary" id="top-add-client-btn">
-                <span class="btn-icon">➕</span> 登记新业务节点
+                <span class="btn-icon">➕</span> <span data-i18n="top-add-client-label">登记新业务节点</span>
               </button>
             </div>
           </div>
 
           <div class="probe-targets">
-                <label><span data-i18n="quick-target-label">快捷目标</span><select class="form-select" data-target-input="node-target-url" aria-label="节点快捷目标"></select></label>
+                <label><span data-i18n="quick-target-label">快捷目标</span><select class="form-select" data-target-input="node-target-url" aria-label="节点快捷目标" data-i18n-aria-label="node-quick-target-aria"></select></label>
                 <label><span data-i18n="node-default-target-label">节点池默认及巡检目标</span><input id="node-target-url" type="url" class="form-input" required value="https://www.google.com/"></label>
               </div>
           <section id="node-test-results" class="node-test-results" role="status" aria-live="polite" hidden>
@@ -436,7 +428,7 @@
           <div class="table-toolbar">
             <div class="search-box">
               <span class="search-icon">🔍</span>
-              <input type="text" id="node-search-input" class="search-input" placeholder="实时过滤节点名称、IP、端口、容器名或业务标签...">
+              <input type="text" id="node-search-input" class="search-input" placeholder="实时过滤节点名称、IP、端口、容器名或业务标签..." data-i18n-placeholder="node-search-ph">
             </div>
             <div class="filter-box">
               <select id="node-filter-type" class="filter-select">
@@ -477,12 +469,12 @@
               <p class="card-subdesc" data-i18n="top-clients-tbody-card-subdesc">管理所有可用的代理网关服务器，支持自由设置默认网关、测试连通性与多对多分配</p>
             </div>
             <button class="btn btn-primary" id="top-add-gw-btn">
-              <span class="btn-icon">➕</span> 添加新网关节点
+              <span class="btn-icon">➕</span> <span data-i18n="top-add-gw-label">添加新网关节点</span>
             </button>
           </div>
 
           <div class="probe-targets">
-            <label><span data-i18n="quick-target-label">快捷目标</span><select class="form-select" data-target-input="gateway-target-url" aria-label="网关池快捷目标"></select></label>
+            <label><span data-i18n="quick-target-label">快捷目标</span><select class="form-select" data-target-input="gateway-target-url" aria-label="网关池快捷目标" data-i18n-aria-label="gateway-quick-target-aria"></select></label>
             <label><span data-i18n="gateway-target-label">网关探测目标地址</span><input id="gateway-target-url" type="url" class="form-input" required value="https://www.google.com/"></label>
           </div>
           <div class="table-responsive">
@@ -517,7 +509,7 @@
             <textarea id="top-noproxy-input" rows="3" class="form-textarea" placeholder="localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,*.local"></textarea>
             <div class="noproxy-actions">
               <button class="btn btn-primary btn-sm" id="top-save-noproxy-btn">
-                <span class="btn-icon">💾</span> 保存白名单规则
+                <span class="btn-icon">💾</span> <span data-i18n="top-save-noproxy-label">保存白名单规则</span>
               </button>
               <span class="save-status-hint" id="top-noproxy-hint"></span>
             </div>
@@ -595,11 +587,11 @@ with ProxySession():
         <div class="form-row">
           <div class="form-group half">
             <label data-i18n="form-client-mode-label">业务节点名称 *:</label>
-            <input type="text" id="form-client-name" class="form-input" placeholder="例如: 开发工作站 / 测试容器">
+            <input type="text" id="form-client-name" class="form-input" placeholder="例如: 开发工作站 / 测试容器" data-i18n-placeholder="form-client-name-ph">
           </div>
           <div class="form-group half">
             <label data-i18n="form-client-name-label">节点唯一标识 (ID, 留空自动生成):</label>
-            <input type="text" id="form-client-id" class="form-input" placeholder="例如: node-worker-202">
+            <input type="text" id="form-client-id" class="form-input" placeholder="例如: node-worker-202" data-i18n-placeholder="form-client-id-ph">
           </div>
         </div>
 
@@ -634,17 +626,17 @@ with ProxySession():
           <div class="form-row">
             <div class="form-group" style="flex: 2;">
               <label data-i18n="section-access-ssh-label">主机 IP 或内网域名 *:</label>
-              <input type="text" id="form-client-host" class="form-input" placeholder="例如: 192.168.1.101 或 10.0.0.12">
+              <input type="text" id="form-client-host" class="form-input" placeholder="例如: 192.168.1.101 或 10.0.0.12" data-i18n-placeholder="form-client-host-ph">
             </div>
             <div class="form-group" style="flex: 1;">
               <label data-i18n="form-client-host-label">SSH 端口 *:</label>
-              <input type="number" id="form-client-port" class="form-input" value="22" placeholder="工作站22, 容器填映射端口如6600">
+              <input type="number" id="form-client-port" class="form-input" value="22" placeholder="工作站22, 容器填映射端口如6600" data-i18n-placeholder="form-client-port-ph">
             </div>
           </div>
           <div class="form-row">
             <div class="form-group half">
               <label data-i18n="form-client-port-label">SSH 登录用户名 *:</label>
-              <input type="text" id="form-client-ssh-user" class="form-input" placeholder="例如: ubuntu, root, developer">
+              <input type="text" id="form-client-ssh-user" class="form-input" placeholder="例如: ubuntu, root, developer" data-i18n-placeholder="form-client-ssh-user-ph">
             </div>
             <div class="form-group half">
               <label data-i18n="form-client-ssh-user-label">SSH 认证方式:</label>
@@ -656,7 +648,7 @@ with ProxySession():
           </div>
           <div class="form-group" id="form-group-client-pass" style="display: none;">
             <label data-i18n="form-group-client-pass-label">SSH 登录密码</label>
-            <input type="password" id="form-client-ssh-pass" class="form-input" placeholder="输入远程账号密码">
+            <input type="password" id="form-client-ssh-pass" class="form-input" placeholder="输入远程账号密码" data-i18n-placeholder="form-client-ssh-pass-ph">
             <div class="input-tip-sub" data-i18n="form-client-ssh-pass-input-tip-sub">Windows、Linux 与 macOS 均支持已核验主机密钥的 SSH 密钥或密码登录。密码只用于此处明确的地址、端口与账号；修改身份时需重新输入，不会自动注册公钥。编辑时密码留空表示沿用原身份已保存的密码。</div>
           </div>
         </div>
@@ -665,12 +657,12 @@ with ProxySession():
         <div id="section-access-docker-host" class="access-subpanel" style="display: none;">
           <div class="form-group">
             <label data-i18n="section-access-docker-host-label">Docker 容器内部名称 *:</label>
-            <input type="text" id="form-client-container" class="form-input" placeholder="例如: app-container">
+            <input type="text" id="form-client-container" class="form-input" placeholder="例如: app-container" data-i18n-placeholder="form-client-container-ph">
           </div>
           <div class="form-row">
             <div class="form-group half">
               <label data-i18n="form-client-container-label">宿主机 IP 地址 *:</label>
-              <input type="text" id="form-client-ssh-host" class="form-input" placeholder="例如: 192.168.1.102">
+              <input type="text" id="form-client-ssh-host" class="form-input" placeholder="例如: 192.168.1.102" data-i18n-placeholder="form-client-ssh-host-ph">
             </div>
             <div class="form-group half">
               <label for="form-client-host-port" data-i18n="form-client-ssh-host-label">宿主机 SSH 端口</label>
@@ -678,27 +670,27 @@ with ProxySession():
             </div>
             <div class="form-group half">
               <label data-i18n="form-client-host-port-label">宿主机免密用户名 *:</label>
-              <input type="text" id="form-client-ssh-user-host" class="form-input" value="ubuntu" placeholder="例如: ubuntu">
+              <input type="text" id="form-client-ssh-user-host" class="form-input" value="ubuntu" placeholder="例如: ubuntu" data-i18n-placeholder="form-client-ssh-user-host-ph">
             </div>
           </div>
         </div>
 
         <div class="form-group">
           <label data-i18n="form-client-ssh-user-host-label">业务标签 (逗号分隔):</label>
-          <input type="text" id="form-client-tags" class="form-input" placeholder="例如: Linux, GPU, 深度学习, Docker, 边缘AI">
+          <input type="text" id="form-client-tags" class="form-input" placeholder="例如: Linux, GPU, 深度学习, Docker, 边缘AI" data-i18n-placeholder="form-client-tags-ph">
         </div>
         <div class="form-group">
           <label data-i18n="form-client-tags-label">节点描述备注:</label>
-          <input type="text" id="form-client-desc" class="form-input" placeholder="例如: 深度学习训练集群或研发测试机">
+          <input type="text" id="form-client-desc" class="form-input" placeholder="例如: 深度学习训练集群或研发测试机" data-i18n-placeholder="form-client-desc-ph">
         </div>
         <div class="form-hint" id="form-client-hint"></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="modal-client-test-btn">
-          <span class="btn-icon">⚡</span> 预检主机连通性
+          <span class="btn-icon">⚡</span> <span data-i18n="modal-client-test-label">预检主机连通性</span>
         </button>
         <button class="btn btn-primary" id="modal-client-save-btn">
-          <span class="btn-icon">💾</span> 保存节点
+          <span class="btn-icon">💾</span> <span data-i18n="modal-client-save-label">保存节点</span>
         </button>
       </div>
     </div>
@@ -717,16 +709,16 @@ with ProxySession():
         <input type="hidden" id="form-gw-mode" value="add">
         <div class="form-group">
           <label data-i18n="form-gw-mode-label">网关唯一标识 (ID, 留空自动生成):</label>
-          <input type="text" id="form-gw-id" class="form-input" placeholder="例如: gw-office-01">
+          <input type="text" id="form-gw-id" class="form-input" placeholder="例如: gw-office-01" data-i18n-placeholder="form-gw-id-ph">
         </div>
         <div class="form-group">
           <label data-i18n="form-gw-id-label">网关名称 *:</label>
-          <input type="text" id="form-gw-name" class="form-input" placeholder="例如: 研发中心出海网关">
+          <input type="text" id="form-gw-name" class="form-input" placeholder="例如: 研发中心出海网关" data-i18n-placeholder="form-gw-name-ph">
         </div>
         <div class="form-row">
           <div class="form-group two-thirds">
             <label data-i18n="form-gw-name-label">服务器 IP / 域名 *:</label>
-            <input type="text" id="form-gw-host" class="form-input" placeholder="例如: 192.168.1.100">
+            <input type="text" id="form-gw-host" class="form-input" placeholder="例如: 192.168.1.100" data-i18n-placeholder="form-gw-host-ph">
           </div>
           <div class="form-group one-third">
             <label data-i18n="form-gw-host-label">端口 *:</label>
@@ -742,20 +734,20 @@ with ProxySession():
         </div>
         <div class="form-group">
           <label data-i18n="form-gw-protocol-label">描述说明:</label>
-          <input type="text" id="form-gw-desc" class="form-input" placeholder="例如: Ubuntu 3090 局域网出海网关">
+          <input type="text" id="form-gw-desc" class="form-input" placeholder="例如: Ubuntu 3090 局域网出海网关" data-i18n-placeholder="form-gw-desc-ph">
         </div>
         <div class="probe-targets">
-                <label><span data-i18n="quick-target-label">快捷目标</span><select class="form-select" data-target-input="modal-target-url" aria-label="网关弹窗快捷目标"></select></label>
+                <label><span data-i18n="quick-target-label">快捷目标</span><select class="form-select" data-target-input="modal-target-url" aria-label="网关弹窗快捷目标" data-i18n-aria-label="modal-quick-target-aria"></select></label>
                 <label><span data-i18n="modal-target-label">请求目标地址</span><input id="modal-target-url" type="url" class="form-input" required value="https://www.google.com/"></label>
               </div>
         <div class="form-hint" id="form-gw-hint"></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="modal-gw-test-btn">
-          <span class="btn-icon">⚡</span> 测试代理请求
+          <span class="btn-icon">⚡</span> <span data-i18n="modal-gw-test-label">测试代理请求</span>
         </button>
         <button class="btn btn-primary" id="modal-gw-save-btn">
-          <span class="btn-icon">💾</span> 保存网关
+          <span class="btn-icon">💾</span> <span data-i18n="modal-gw-save-label">保存网关</span>
         </button>
       </div>
     </div>

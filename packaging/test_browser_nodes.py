@@ -31,7 +31,7 @@ def listener(handler):
 
 def node_probe_result(name, code):
     """A read-only result for one node, as the console renders it."""
-    return {
+    check = {
         "message": "只读请求已完成", "success": code == 200, "online": code == 200,
         "http_ok": code == 200, "code": code, "first_status": code, "final_status": code,
         "status_line": "HTTP " + str(code), "target_url": "http://node-fixture.invalid/probe",
@@ -42,7 +42,12 @@ def node_probe_result(name, code):
         "execution_identity": {"uid": "1000", "user": "qa", "home": "/home/qa",
                                "curl_config": "/home/qa/.curlrc"},
         "stages": {"ssh": "passed", "http": "passed" if code == 200 else "failed"},
+    }
+    return {
+        **check,
         "node_id": name,
+        "explicit_proxy": check,
+        "ordinary_request": check,
     }
 
 
@@ -88,7 +93,6 @@ def run():
         def route_probe(route):
             node = route.request.post_data_json.get("node_id")
             answers[node] = route
-            route.continue_()
 
         page.route("**/api/node-test", route_probe)
         one = page.locator('tr', has=page.locator('[data-action="test-node-out"][data-id="node-one"]'))
@@ -100,8 +104,8 @@ def run():
         answers["node-one"].fulfill(json=node_probe_result("node-one", 200))
         answers["node-two"].fulfill(json=node_probe_result("node-two", 403))
         page.wait_for_timeout(300)
-        expect(page.locator("#node-test-heading")).to_contain_text("node-two")
-        expect(page.locator("#node-test-record")).to_contain_text("HTTP 403")
+        expect(page.locator("#node-test-heading")).to_contain_text("Node two")
+        expect(page.locator("#node-test-checks")).to_contain_text("HTTP 403")
         expect(one.locator(".rtt-pill")).to_have_text("HTTP 成功")
         expect(two.locator(".rtt-pill")).to_have_text("查看结果")
         page.unroute("**/api/node-test")

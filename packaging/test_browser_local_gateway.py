@@ -71,7 +71,13 @@ def run():
         gateways = load_config()["gateways"]
         assert any(gateway["id"] == "local-gateway" for gateway in gateways), gateways
 
-        # The demo sends one request through the gateway to the demo origin.
+        # Stopping the gateway removes it again.
+        page.locator("#local-gateway-stop").click()
+        expect(page.locator("#local-gateway-start")).to_be_visible()
+        assert not any(gateway["id"] == "local-gateway"
+                       for gateway in load_config()["gateways"])
+
+        # The demo starts the gateway and sends one request through it to the demo origin.
         def probe(name, target_info, proxy_url, timeout=15.0, include_preview=False):
             return {"name": name, "url": target_info, "status": "online", "http_ok": True,
                     "path_verified": True, "code": 200, "final_url": target_info,
@@ -82,7 +88,7 @@ def run():
             expect(page.locator("#setup-result")).to_contain_text("HTTP 200", timeout=15000)
         expect(page.locator("#local-gateway-state")).to_contain_text("127.0.0.1:")
 
-        # Stopping the gateway removes it again.
+        # Clean up by stopping the gateway.
         page.locator("#local-gateway-stop").click()
         expect(page.locator("#local-gateway-start")).to_be_visible()
         assert not any(gateway["id"] == "local-gateway"

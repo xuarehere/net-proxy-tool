@@ -15,6 +15,41 @@ from web import server
 ROOT = Path(__file__).resolve().parents[1]
 DATA_I18N = re.compile(r'data-i18n(?:-[a-z-]+)?="([^"]+)"')
 CALL = re.compile(r'\bt\("([^"]+)"')
+CALL_WITH_ARGS = re.compile(r'\bt\("([^"]+)"(?:\s*,\s*\{([^}]*)\})?')
+CJK = re.compile(r"[\u4e00-\u9fff]")
+
+
+def _js_object_keys(raw):
+    keys = []
+    depth = 0
+    quote = None
+    escaped = False
+    start = 0
+    for index, ch in enumerate(raw):
+        if escaped:
+            escaped = False
+            continue
+        if quote:
+            if ch == "\\":
+                escaped = True
+            elif ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"', "`"):
+            quote = ch
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth = max(0, depth - 1)
+        elif ch == "," and depth == 0:
+            part = raw[start:index].strip()
+            if part:
+                keys.append(part.split(":", 1)[0].strip())
+            start = index + 1
+    tail = raw[start:].strip()
+    if tail:
+        keys.append(tail.split(":", 1)[0].strip())
+    return sorted(keys)
 
 
 class CatalogueTests(unittest.TestCase):
@@ -39,6 +74,42 @@ class CatalogueTests(unittest.TestCase):
         self.assertGreater(len(keys), 200)
         unknown = sorted(key for key in keys if key not in messages.MESSAGES)
         self.assertEqual(unknown, [])
+
+    def test_every_translated_call_provides_expected_placeholders(self):
+        script = (ROOT / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        mismatches = []
+        for lineno, line in enumerate(script.splitlines(), 1):
+            if '=t("' in line:
+                mismatches.append((lineno, "uninterpolated attribute t()", line.strip()))
+            for match in CALL_WITH_ARGS.finditer(line):
+                key, raw_args = match.group(1), match.group(2)
+                expected = messages.placeholders(key)
+                provided = _js_object_keys(raw_args) if raw_args is not None else []
+                if expected != provided:
+                    mismatches.append((lineno, key, expected, provided))
+        self.assertEqual(mismatches, [])
+
+    def test_no_raw_chinese_strings_remain_in_script(self):
+        script = (ROOT / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        leftovers = []
+        for lineno, line in enumerate(script.splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith(("//", "/*", "*")):
+                continue
+            if CJK.search(stripped):
+                leftovers.append((lineno, stripped))
+        self.assertEqual(leftovers, [])
+
+    def test_no_unmarked_chinese_elements_in_page(self):
+        html = (ROOT / "web" / "static" / "index.html").read_text(encoding="utf-8")
+        unmarked = []
+        for lineno, line in enumerate(html.splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("<!--"):
+                continue
+            if CJK.search(stripped) and "data-i18n" not in stripped:
+                unmarked.append((lineno, stripped))
+        self.assertEqual(unmarked, [])
 
     def test_the_language_of_a_request_is_normalized(self):
         self.assertEqual(messages.normalize_language("zh"), "zh-CN")
