@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 DEFAULT_TEST_URL = "https://www.google.com/"
 NO_PROXY = "localhost,127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,*.local"
 # Both tables shipped in v1.4.1: generated settings used the site name as

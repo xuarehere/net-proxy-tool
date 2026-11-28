@@ -418,8 +418,8 @@ MESSAGES = {
         "zh-CN": '显式开启时才会下发工具和 shell 配置。操作目标是所选账号或容器，以 root 执行时还可能修改目标系统级配置。关闭时按快照恢复。遇到人工编辑或旧版缺少快照时，请查看提示并核对备份。',
     },
     'hb-docker-span': {
-        "en": 'Net-Proxy-Tool v1.5.0 · HTTP proxy console',
-        "zh-CN": 'Net-Proxy-Tool v1.5.0 · HTTP 代理控制台',
+        "en": 'Net-Proxy-Tool v1.5.1 · HTTP proxy console',
+        "zh-CN": 'Net-Proxy-Tool v1.5.1 · HTTP 代理控制台',
     },
     'hb-sdk-btn-copy': {
         "en": 'Copy the example',
@@ -2030,8 +2030,8 @@ MESSAGES = {
         "zh-CN": '🤖 目标业务节点池 (Worker Nodes Pool)',
     },
     'title': {
-        "en": 'Net-Proxy-Tool — cross-platform console for LAN proxying and Docker network isolation (v1.5.0)',
-        "zh-CN": 'Net-Proxy-Tool 通用跨平台局域网出海与 Docker 容器隔离控制中心 (v1.5.0)',
+        "en": 'Net-Proxy-Tool — cross-platform console for LAN proxying and Docker network isolation (v1.5.1)',
+        "zh-CN": 'Net-Proxy-Tool 通用跨平台局域网出海与 Docker 容器隔离控制中心 (v1.5.1)',
     },
     'top-add-client-label': {
         "en": 'Register node',

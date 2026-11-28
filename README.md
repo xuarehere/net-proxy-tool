@@ -10,13 +10,13 @@ Gateway tests show the selected site’s final response or the host where the re
 
 ## Download and open the console
 
-| System | Download v1.5.0 | Start after extracting |
+| System | Download v1.5.1 | Start after extracting |
 | --- | --- | --- |
-| Windows | [x64 · ZIP](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.5.0/net-proxy-tool-windows-x64.zip) | `Start.bat` |
-| macOS | [Apple Silicon · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.5.0/net-proxy-tool-macos-arm64.tar.gz) | `./net-proxy-tool` |
-| macOS | [Intel · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.5.0/net-proxy-tool-macos-x64.tar.gz) | `./net-proxy-tool` |
-| Linux · glibc | [x86_64 · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.5.0/net-proxy-tool-linux-x64.tar.gz) | `./net-proxy-tool` |
-| Linux · glibc | [ARM64 · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.5.0/net-proxy-tool-linux-arm64.tar.gz) | `./net-proxy-tool` |
+| Windows | [x64 · ZIP](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.5.1/net-proxy-tool-windows-x64.zip) | `Start.bat` |
+| macOS | [Apple Silicon · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.5.1/net-proxy-tool-macos-arm64.tar.gz) | `./net-proxy-tool` |
+| macOS | [Intel · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.5.1/net-proxy-tool-macos-x64.tar.gz) | `./net-proxy-tool` |
+| Linux · glibc | [x86_64 · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.5.1/net-proxy-tool-linux-x64.tar.gz) | `./net-proxy-tool` |
+| Linux · glibc | [ARM64 · tar.gz](https://github.com/xuarehere/net-proxy-tool/releases/download/v1.5.1/net-proxy-tool-linux-arm64.tar.gz) | `./net-proxy-tool` |
 
 The release checks run the downloaded packages on Windows x64, macOS 15 (Intel and Apple Silicon), Ubuntu 24.04 (x64 and ARM64), plus clean Ubuntu 22.04/24.04 and Debian 12 x64 containers. The runtime is also checked on Python 3.8 and 3.13. For Alpine/musl, use [Docker Compose](docs/operations_en.md).
 
@@ -24,7 +24,7 @@ The release checks run the downloaded packages on Windows x64, macOS 15 (Intel a
 2. In the browser, enter the **host and HTTP or mixed port** of a running proxy, then save it. Use `127.0.0.1` when the proxy client runs on the same computer. Read the port from that client’s settings.
 3. Click **Send a proxy request**. A successful HTTP status from your target completes the first request.
 
-For checksums, source installation, shutdown and port conflicts, see the [quick start](QUICKSTART_EN.md). [Release assets and checksums](https://github.com/xuarehere/net-proxy-tool/releases/tag/v1.5.0)
+For checksums, source installation, shutdown and port conflicts, see the [quick start](QUICKSTART_EN.md). [Release assets and checksums](https://github.com/xuarehere/net-proxy-tool/releases/tag/v1.5.1)
 
 Choose Google, Claude, ChatGPT, YouTube, Gemini or a custom URL in the worker pool. The two probes show the node, selected target, initial response, final HTTP status and observed peer.
 
