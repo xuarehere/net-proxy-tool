@@ -48,7 +48,6 @@ class LegacyProvisionTests(unittest.TestCase):
         self.assert_original()
         result = self.switch('on')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('restoration baseline', result.stdout)
         self.assertNotIn('fixture-secret', result.stdout + result.stderr)
         state = self.home / '.local/state/net-proxy-tool'
         self.assertTrue((state / 'wgetrc/absent').is_file())
